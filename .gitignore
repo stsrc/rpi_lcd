@@ -1,0 +1,8 @@
+*.o
+*.ko
+*.mod.c
+.tmp_versions
+*.order
+*.symvers
+*cmd
+spidev_test
