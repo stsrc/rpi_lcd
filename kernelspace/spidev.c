@@ -38,7 +38,7 @@
 #include <linux/gpio.h>
 
 #include <linux/delay.h>
-
+#include <linux/kernel.h>
 
 /*
  * This supports access to SPI devices using normal userspace I/O calls.
@@ -357,10 +357,9 @@ static int spidev_message(struct spidev_data *spidev,
 		gpio_set_value(lcd_gpio[0].gpio, 1);
 	else			/*command transfer*/
 		gpio_set_value(lcd_gpio[0].gpio, 0);
-	ndelay(100);
-	debug_message();
+	ndelay(250);
+	mb();
 	status = spidev_sync(spidev, &msg);
-	debug_message();
 	if (status < 0)
 		goto done;
 
