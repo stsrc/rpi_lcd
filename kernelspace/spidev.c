@@ -256,7 +256,7 @@ static inline void spidev_unset_gpio(void)
 
 static void spidev_reset_lcd(void) {
 	gpio_set_value(lcd_gpio[1].gpio, 0);
-	udelay(500);
+	udelay(25);
 	gpio_set_value(lcd_gpio[1].gpio, 1);
 	mdelay(10);
 }

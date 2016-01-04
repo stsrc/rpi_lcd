@@ -20,7 +20,7 @@ static void pabort(const char *s)
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 1000000;
+static uint32_t speed = 9600;
 static uint16_t delay = 0;
 
 static void transfer(int fd, uint8_t data_cmd, uint8_t *tx, 
@@ -44,7 +44,7 @@ static void transfer(int fd, uint8_t data_cmd, uint8_t *tx,
 void make_byte(char *byte, uint8_t value) 
 {
 	for (int i = 0; i < 8; i++) {
-		if (value & 1 << i)
+		if (value & (1 << i))
 			byte[7 - i] = '1';
 		else
 			byte[7 - i] = '0';
@@ -74,6 +74,14 @@ void lcd_reset(int fd)
 	uint8_t rx;
 	transfer(fd, data_cmd, &tx, &rx, 1);		
 	sleep(1);
+}
+
+void lcd_init(int fd)
+{
+	//int data_cmd = 0;
+	//uint8_t tx[5];
+	//uint8_t rx[5];
+	lcd_reset(fd);	
 }
 
 int main(int argc, char *argv[])
@@ -127,8 +135,8 @@ int main(int argc, char *argv[])
 	memset(tx, 0, sizeof(tx));
 	memset(rx, 0, sizeof(rx));
 
-	lcd_reset(fd);
-	tx[0] = 0x04;
+	lcd_init(fd);
+	tx[0] = 0x09;
 	transfer(fd, data_cmd, tx, rx, 5);
 	print_transfer(data_cmd, tx, rx, 5);
 	close(fd);
