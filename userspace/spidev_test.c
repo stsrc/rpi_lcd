@@ -8,6 +8,8 @@
 #include <linux/types.h>
 #include "spidev.h"
 #include <string.h>
+#include <stdarg.h>
+#include <errno.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -20,7 +22,7 @@ static void pabort(const char *s)
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 9600;
+static uint32_t speed = 500000;
 static uint16_t delay = 0;
 
 static void transfer(int fd, uint8_t data_cmd, uint8_t *tx, 
@@ -41,7 +43,7 @@ static void transfer(int fd, uint8_t data_cmd, uint8_t *tx,
 		pabort("ioctl");
 }
 
-void make_byte(char *byte, uint8_t value) 
+static void make_byte(char *byte, uint8_t value) 
 {
 	for (int i = 0; i < 8; i++) {
 		if (value & (1 << i))
@@ -67,7 +69,7 @@ static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint8_t n)
 	}
 }
 
-void lcd_reset(int fd)
+static void lcd_reset(int fd)
 {
 	int data_cmd = 0;
 	uint8_t tx = 0x01;
@@ -76,12 +78,74 @@ void lcd_reset(int fd)
 	sleep(1);
 }
 
-void lcd_init(int fd)
+static int transfer_cmd_data(int fd, int arg_cnt, ... )
 {
-	//int data_cmd = 0;
-	//uint8_t tx[5];
-	//uint8_t rx[5];
-	lcd_reset(fd);	
+	va_list arg_list;
+	uint8_t cmd;
+	uint8_t temp;
+	uint8_t *tx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
+	uint8_t *rx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
+	
+	if (((tx == NULL) || (rx = NULL)) && (arg_cnt != 1)) {
+		if (tx != NULL)
+			free(tx);
+		else if (rx != NULL)
+			free(rx);
+		return -ENOMEM;
+	}
+
+	va_start(arg_list, arg_cnt);
+	cmd = va_arg(arg_list, int);
+
+	for (int i = 0; i < arg_cnt - 1; i++) 
+		tx[i] = va_arg(arg_list, int);
+
+	va_end(arg_list);
+	
+	transfer(fd, 0, &cmd, &temp, 1);
+	if (arg_cnt != 1) {	
+		transfer(fd, 1, tx, rx, arg_cnt - 1);
+		free(tx);
+		free(rx);
+	}
+	
+	return 0;
+}
+
+static int transfer_read_data(int fd, int n, uint8_t cmd)
+{
+	uint8_t *tx = malloc(n);
+	uint8_t *rx = malloc(n);
+	if ((tx == NULL) || (rx == NULL)) {
+		if (tx != NULL)
+			free(tx);
+		else if (rx != NULL)
+			free(rx);
+		return -ENOMEM;
+	}
+	memset(tx, 0, n);
+	memset(rx, 0, n);
+	tx[0] = cmd;
+	transfer(fd, 0, tx, rx, n);
+	print_transfer(1, tx, rx, n);
+	free(tx);
+	free(rx);
+	return 0;
+}
+
+static void lcd_init(int fd)
+{
+	lcd_reset(fd);
+	/* Display OFF*/
+	transfer_cmd_data(fd, 1, 0x28);
+	transfer_read_data(fd, 2, 0x0A);
+	/*Display ON*/
+	transfer_cmd_data(fd, 1, 0x29);
+	sleep(1);
+	/*Display sleep out*/
+	transfer_cmd_data(fd, 1, 0x11);
+	sleep(1);
+	transfer_read_data(fd, 2, 0x0A);
 }
 
 int main(int argc, char *argv[])
@@ -130,16 +194,7 @@ int main(int argc, char *argv[])
 	printf("bits per word: %d\n", bits);
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
-	uint8_t data_cmd, tx[5], rx[5];
-	data_cmd = 0;
-	memset(tx, 0, sizeof(tx));
-	memset(rx, 0, sizeof(rx));
-
 	lcd_init(fd);
-	tx[0] = 0x09;
-	transfer(fd, data_cmd, tx, rx, 5);
-	print_transfer(data_cmd, tx, rx, 5);
 	close(fd);
-
 	return ret;
 }

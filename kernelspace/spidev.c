@@ -223,7 +223,7 @@ spidev_write(struct file *filp, const char __user *buf,
 static struct gpio lcd_gpio[] = {
 	{ 24, GPIOF_OUT_INIT_LOW, "DC" },
 	{ 25, GPIOF_OUT_INIT_HIGH, "RESET" },
-	{ 18, GPIOF_OUT_INIT_LOW, "LED" }
+	{ 18, GPIOF_OUT_INIT_HIGH, "LED" }
 };
 
 #define debug_message() printk(KERN_EMERG "Debug message: "\
