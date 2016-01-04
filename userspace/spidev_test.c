@@ -78,7 +78,7 @@ static void lcd_reset(int fd)
 	sleep(1);
 }
 
-static int transfer_cmd_data(int fd, int arg_cnt, ... )
+static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 {
 	va_list arg_list;
 	uint8_t cmd;
@@ -112,7 +112,7 @@ static int transfer_cmd_data(int fd, int arg_cnt, ... )
 	return 0;
 }
 
-static int transfer_read_data(int fd, int n, uint8_t cmd)
+static int transfer_rd_d(int fd, int n, uint8_t cmd)
 {
 	uint8_t *tx = malloc(n);
 	uint8_t *rx = malloc(n);
@@ -135,17 +135,32 @@ static int transfer_read_data(int fd, int n, uint8_t cmd)
 
 static void lcd_init(int fd)
 {
+	uint8_t tx[3] = {0x0 << 2, 0x0 << 2, 0x3f << 2};
+	uint8_t rx[3];
+
 	lcd_reset(fd);
 	/* Display OFF*/
-	transfer_cmd_data(fd, 1, 0x28);
-	transfer_read_data(fd, 2, 0x0A);
+	transfer_wr_cmdd(fd, 1, 0x28);
+	transfer_rd_d(fd, 2, 0x0A);
 	/*Display ON*/
-	transfer_cmd_data(fd, 1, 0x29);
+	transfer_wr_cmdd(fd, 1, 0x29);
 	sleep(1);
 	/*Display sleep out*/
-	transfer_cmd_data(fd, 1, 0x11);
+	transfer_wr_cmdd(fd, 1, 0x11);
 	sleep(1);
-	transfer_read_data(fd, 2, 0x0A);
+	/*Pixel format set - 18bits/pixel*/
+	transfer_wr_cmdd(fd, 2, 0x3A, 0b01100110);
+	/*Brightness control block on*/
+	transfer_wr_cmdd(fd, 2, 0x53, 0b00101100);
+	sleep(1);
+	/*Display brightness - 0xff*/
+	transfer_wr_cmdd(fd, 2, 0x51, 0xFF);
+	sleep(1);
+	transfer_rd_d(fd, 2, 0x52);
+	transfer_rd_d(fd, 2, 0x54);
+	transfer_wr_cmdd(fd, 4, 0x2C, tx[0], tx[1], tx[2]);
+	for (int i = 0; i < 50000; i++)
+		transfer(fd, 1, tx, rx, 3); 
 }
 
 int main(int argc, char *argv[])
