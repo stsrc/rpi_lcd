@@ -11,7 +11,10 @@
 #include <stdarg.h>
 #include <errno.h>
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#include <time.h>
+
+#define LENGTH_MAX 239
+#define HEIGHT_MAX 319
 
 static void pabort(const char *s)
 {
@@ -22,7 +25,7 @@ static void pabort(const char *s)
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 5000000;
+static uint32_t speed = 32000000;
 static uint16_t delay = 0;
 
 static void transfer(int fd, uint8_t data_cmd, uint8_t *tx, 
@@ -67,15 +70,6 @@ static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint8_t n)
 		make_byte(byte, rx[i]);
 		printf("Received byte: %s\n", byte);
 	}
-}
-
-static void lcd_reset(int fd)
-{
-	int data_cmd = 0;
-	uint8_t tx = 0x01;
-	uint8_t rx;
-	transfer(fd, data_cmd, &tx, &rx, 1);		
-	sleep(1);
 }
 
 static uint8_t check_clean_mem(void *tx, void *rx) 
@@ -138,27 +132,29 @@ int transfer_rd_d(int fd, int n, uint8_t cmd)
 
 static void lcd_init(int fd)
 {
-	lcd_reset(fd);
+	struct timespec req;
+	/*Reset*/
+	transfer_wr_cmdd(fd, 1, 0x01);
+	req.tv_sec = 0;
+	req.tv_nsec = 120000000; //120ms.	
+	nanosleep(&req, NULL);
 	/* Display OFF*/
 	transfer_wr_cmdd(fd, 1, 0x28);
 	/*Display ON*/
 	transfer_wr_cmdd(fd, 1, 0x29);
-	sleep(1);
 	/*Display sleep out*/
 	transfer_wr_cmdd(fd, 1, 0x11);
-	sleep(1);
+	req.tv_nsec = 5000000; //5ms
+	nanosleep(&req, NULL);
 	/*Pixel format set - 18bits/pixel*/
 	transfer_wr_cmdd(fd, 2, 0x3A, 0b01100110);
 	/*Brightness control block on*/
 	transfer_wr_cmdd(fd, 2, 0x53, 0b00101100);
-	sleep(1);
+	nanosleep(&req, NULL); //5ms
 	/*Display brightness - 0xff*/
 	transfer_wr_cmdd(fd, 2, 0x51, 0xFF);
-	sleep(1);
+	nanosleep(&req, NULL); //5ms
 }
-
-#define LENGTH_MAX 0xEF
-#define HEIGHT_MAX 0x13F
 
 static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *younger)
 {
@@ -172,13 +168,13 @@ static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 	const uint8_t single_wr_max = 255;
 	uint32_t written = 0;
 	transfer_wr_cmdd(fd, 1, 0x2C);
-	while (mem_size > single_wr_max) {
+	while (mem_size >= single_wr_max) {
 		transfer(fd, 1, &tx[written], &rx[written], single_wr_max);
-		written += single_wr_max + 1;
-		mem_size -= single_wr_max + 1;
+		written += single_wr_max;
+		mem_size -= single_wr_max;
 	}
 	if (mem_size != 0)
-	transfer(fd, 1, tx, rx, mem_size);
+	transfer(fd, 1, &tx[written], &rx[written], mem_size);
 }
 
 static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
@@ -209,17 +205,17 @@ static int lcd_fill_rect_with_colour(uint8_t *tx, const uint32_t mem_size,
 	return 0;
 }
 
-static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
-			      uint16_t length, uint8_t red, uint8_t green,
+static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
+			      uint16_t height, uint8_t red, uint8_t green,
 			      uint8_t blue)
 {
 	uint8_t *tx;
-	uint8_t *rx;
+	uint8_t *rx = NULL;
 	uint32_t mem_size;
-	if (x + length > LENGTH_MAX)
-	       return 1;
-	else if (y + height > HEIGHT_MAX)
-		return 1;
+	if (x + length > LENGTH_MAX + 1)
+		pabort("Wrong parameters");
+	else if (y + height > HEIGHT_MAX + 1)
+		pabort("Wrong parameters");
 	mem_size = 3 * height * length; // 3 bytes (RGB) * pixel cnt
 	tx = malloc(mem_size);
 	memset(tx, 0x50 << 2, mem_size);
@@ -236,6 +232,11 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
 	free(rx);
 	free(tx);
 	return 0;
+}
+static int lcd_clear_background(int fd) 
+{
+	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX + 1, HEIGHT_MAX + 1, 0x3f, 
+				  0x2b, 0x2c);
 }
 
 int main(int argc, char *argv[])
@@ -285,9 +286,8 @@ int main(int argc, char *argv[])
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
 	lcd_init(fd);
-	ret = lcd_draw_rectangle(fd, 120, 160, 50, 50, 0x3F, 0x3F, 0x20);
-	if (ret)
-		pabort("lcd_draw_rectangle");
+	lcd_clear_background(fd);
+
 	close(fd);
 	return ret;
 }
