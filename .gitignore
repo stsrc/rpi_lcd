@@ -6,3 +6,4 @@
 *.symvers
 *cmd
 spidev_test
+*.swp

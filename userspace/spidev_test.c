@@ -22,7 +22,7 @@ static void pabort(const char *s)
 static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 500000;
+static uint32_t speed = 5000000;
 static uint16_t delay = 0;
 
 static void transfer(int fd, uint8_t data_cmd, uint8_t *tx, 
@@ -78,6 +78,17 @@ static void lcd_reset(int fd)
 	sleep(1);
 }
 
+static uint8_t check_clean_mem(void *tx, void *rx) 
+{
+	if (tx == NULL || rx == NULL) {
+		if (tx != NULL)
+			free(tx);
+		else if (rx != NULL)
+			free(rx);
+		return 1;		
+	}
+	return 0;
+}
 static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 {
 	va_list arg_list;
@@ -86,12 +97,9 @@ static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 	uint8_t *tx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
 	uint8_t *rx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
 	
-	if (((tx == NULL) || (rx = NULL)) && (arg_cnt != 1)) {
-		if (tx != NULL)
-			free(tx);
-		else if (rx != NULL)
-			free(rx);
-		return -ENOMEM;
+	if (arg_cnt != 1) {
+		if (check_clean_mem(tx, rx))
+			pabort("No mem.");
 	}
 
 	va_start(arg_list, arg_cnt);
@@ -112,17 +120,12 @@ static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 	return 0;
 }
 
-static int transfer_rd_d(int fd, int n, uint8_t cmd)
+int transfer_rd_d(int fd, int n, uint8_t cmd)
 {
 	uint8_t *tx = malloc(n);
 	uint8_t *rx = malloc(n);
-	if ((tx == NULL) || (rx == NULL)) {
-		if (tx != NULL)
-			free(tx);
-		else if (rx != NULL)
-			free(rx);
-		return -ENOMEM;
-	}
+	if (check_clean_mem(tx, rx))
+		pabort("No mem.");
 	memset(tx, 0, n);
 	memset(rx, 0, n);
 	tx[0] = cmd;
@@ -135,13 +138,9 @@ static int transfer_rd_d(int fd, int n, uint8_t cmd)
 
 static void lcd_init(int fd)
 {
-	uint8_t tx[3] = {0x0 << 2, 0x0 << 2, 0x3f << 2};
-	uint8_t rx[3];
-
 	lcd_reset(fd);
 	/* Display OFF*/
 	transfer_wr_cmdd(fd, 1, 0x28);
-	transfer_rd_d(fd, 2, 0x0A);
 	/*Display ON*/
 	transfer_wr_cmdd(fd, 1, 0x29);
 	sleep(1);
@@ -156,11 +155,87 @@ static void lcd_init(int fd)
 	/*Display brightness - 0xff*/
 	transfer_wr_cmdd(fd, 2, 0x51, 0xFF);
 	sleep(1);
-	transfer_rd_d(fd, 2, 0x52);
-	transfer_rd_d(fd, 2, 0x54);
-	transfer_wr_cmdd(fd, 4, 0x2C, tx[0], tx[1], tx[2]);
-	for (int i = 0; i < 50000; i++)
-		transfer(fd, 1, tx, rx, 3); 
+}
+
+#define LENGTH_MAX 0xEF
+#define HEIGHT_MAX 0x13F
+
+static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *younger)
+{
+	*older = value >> 8;
+	value = value << 8;
+	*younger = value >> 8;	
+}
+
+static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
+{
+	const uint8_t single_wr_max = 255;
+	uint32_t written = 0;
+	transfer_wr_cmdd(fd, 1, 0x2C);
+	while (mem_size > single_wr_max) {
+		transfer(fd, 1, &tx[written], &rx[written], single_wr_max);
+		written += single_wr_max + 1;
+		mem_size -= single_wr_max + 1;
+	}
+	if (mem_size != 0)
+	transfer(fd, 1, tx, rx, mem_size);
+}
+
+static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
+			      uint16_t length)
+{
+	uint8_t byte[4];
+	lcd_create_bytes(x, &byte[0], &byte[1]);
+	lcd_create_bytes(x + length, &byte[2], &byte[3]);
+	transfer_wr_cmdd(fd, 5, 0x2A, byte[0], byte[1], byte[2], byte[3]);
+	lcd_create_bytes(y, &byte[0], &byte[1]);
+	lcd_create_bytes(y + height, &byte[2], &byte[3]);
+	transfer_wr_cmdd(fd, 5, 0x2B, byte[0], byte[1], byte[2], byte[3]);
+}
+
+static int lcd_fill_rect_with_colour(uint8_t *tx, const uint32_t mem_size, 
+				     const uint8_t red, const uint8_t green,
+				     const uint8_t blue)
+{
+	const uint8_t col_max = 0x3F; //each colour may have only 6 bit value. 
+	const uint8_t colors_in_pix = 3;
+	if (red > col_max || green > col_max || blue > col_max)
+		return 1;
+	for(uint32_t i = 0; i < mem_size; i += colors_in_pix) {
+		tx[i] = (blue << 2);	
+		tx[i+1] = (green << 2);
+		tx[i+2] = (red << 2);
+	}
+	return 0;
+}
+
+static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
+			      uint16_t length, uint8_t red, uint8_t green,
+			      uint8_t blue)
+{
+	uint8_t *tx;
+	uint8_t *rx;
+	uint32_t mem_size;
+	if (x + length > LENGTH_MAX)
+	       return 1;
+	else if (y + height > HEIGHT_MAX)
+		return 1;
+	mem_size = 3 * height * length; // 3 bytes (RGB) * pixel cnt
+	tx = malloc(mem_size);
+	memset(tx, 0x50 << 2, mem_size);
+	rx = malloc(mem_size);//do I need it?
+	if (check_clean_mem(tx, rx))
+		pabort("No memory.");
+	lcd_set_rectangle(fd, x, y, height, length);
+	if (lcd_fill_rect_with_colour(tx, mem_size, red, green, blue)) {
+		free(tx);
+		free(rx);
+		pabort("Wrong colours.");
+	}
+	lcd_draw(fd, tx, rx, mem_size);
+	free(rx);
+	free(tx);
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -210,6 +285,9 @@ int main(int argc, char *argv[])
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
 	lcd_init(fd);
+	ret = lcd_draw_rectangle(fd, 120, 160, 50, 50, 0x3F, 0x3F, 0x20);
+	if (ret)
+		pabort("lcd_draw_rectangle");
 	close(fd);
 	return ret;
 }
