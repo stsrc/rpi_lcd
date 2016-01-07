@@ -1,0 +1,2 @@
+#!/bin/bash
+sudo rmmod lcd_spi && sudo insmod lcd_spi.ko
