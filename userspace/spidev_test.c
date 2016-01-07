@@ -29,7 +29,7 @@ static uint32_t speed = 32000000;
 static uint16_t delay = 0;
 
 static void transfer(int fd, uint8_t data_cmd, uint8_t *tx, 
-		     uint8_t *rx, uint8_t n)
+		     uint8_t *rx, uint32_t n)
 {
 	int ret;
 	struct spi_ioc_transfer tr = {
@@ -57,7 +57,7 @@ static void make_byte(char *byte, uint8_t value)
 	byte[8] = '\0';
 }
 
-static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint8_t n)
+static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint32_t n)
 {
 	char byte[9];
 	for (int i = 0; i < n; i++) {
@@ -165,7 +165,7 @@ static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *you
 
 static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 {
-	const uint8_t single_wr_max = 255;
+	const uint32_t single_wr_max = 255*2;
 	uint32_t written = 0;
 	transfer_wr_cmdd(fd, 1, 0x2C);
 	while (mem_size >= single_wr_max) {
@@ -235,8 +235,8 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 }
 static int lcd_clear_background(int fd) 
 {
-	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX + 1, HEIGHT_MAX + 1, 0x3f, 
-				  0x2b, 0x2c);
+	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX + 1, HEIGHT_MAX + 1, 0, 
+				  0, 0);
 }
 
 int main(int argc, char *argv[])

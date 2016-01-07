@@ -1,6 +1,6 @@
-ccflags-y += -DDEBUG -Wall -Wno-declaration-after-statement
+cflags-y += -DDEBUG -Wall -Wno-declaration-after-statement
 ifneq ($(KERNELRELEASE),)
-	obj-m := spidev.o
+	obj-m := lcd_spi.o
 
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
