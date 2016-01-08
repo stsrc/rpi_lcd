@@ -53,39 +53,6 @@
 
 #define SPI_IOC_MAGIC			'k'
 
-/**
- * struct spi_ioc_transfer - describes a single SPI transfer
- * @tx_buf: Holds pointer to userspace buffer with transmit data, or null.
- *	If no data is provided, zeroes are shifted out.
- * @rx_buf: Holds pointer to userspace buffer for receive data, or null.
- * @len: Length of tx and rx buffers, in bytes.
- * @speed_hz: Temporary override of the device's bitrate.
- * @bits_per_word: Temporary override of the device's wordsize.
- * @delay_usecs: If nonzero, how long to delay after the last bit transfer
- *	before optionally deselecting the device before the next transfer.
- * @cs_change: True to deselect device before starting the next transfer.
- *
- * This structure is mapped directly to the kernel spi_transfer structure;
- * the fields have the same meanings, except of course that the pointers
- * are in a different address space (and may be of different sizes in some
- * cases, such as 32-bit i386 userspace over a 64-bit x86_64 kernel).
- * Zero-initialize the structure, including currently unused fields, to
- * accommodate potential future updates.
- *
- * SPI_IOC_MESSAGE gives userspace the equivalent of kernel spi_sync().
- * Pass it an array of related transfers, they'll execute together.
- * Each transfer may be half duplex (either direction) or full duplex.
- *
- *	struct spi_ioc_transfer mesg[4];
- *	...
- *	status = ioctl(fd, SPI_IOC_MESSAGE(4), mesg);
- *
- * So for example one transfer might send a nine bit command (right aligned
- * in a 16-bit word), the next could read a block of 8-bit data before
- * terminating that command by temporarily deselecting the chip; the next
- * could send a different nine bit command (re-selecting the chip), and the
- * last transfer might write some register values.
- */
 struct lcdd_transfer {
 	uint32_t byte_cnt;
 	uint8_t data_cmd;
@@ -119,6 +86,7 @@ struct lcdd_transfer {
 #define SPI_IOC_RD_MODE32		_IOR(SPI_IOC_MAGIC, 5, __u32)
 #define SPI_IOC_WR_MODE32		_IOW(SPI_IOC_MAGIC, 5, __u32)
 
-
+#define SPI_IO_WR_DATA			_IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
+#define SPI_IO_RD_DATA			_IOR(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
 
 #endif /* SPIDEV_H */

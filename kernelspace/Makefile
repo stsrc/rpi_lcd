@@ -1,4 +1,4 @@
-cflags-y += -DDEBUG -Wall -Wno-declaration-after-statement
+ccflags-y += -DDEBUG -Wall -Wno-declaration-after-statement
 ifneq ($(KERNELRELEASE),)
 	obj-m := lcd_spi.o
 

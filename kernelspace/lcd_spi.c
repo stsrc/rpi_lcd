@@ -23,6 +23,11 @@
 #define debug_message()
 #endif
 
+#define SPI_IOC_MAGIC 'k'
+#define SPI_IO_WR_DATA _IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
+#define SPI_IO_CMD_RD _IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+#define SPI_IO_CMD_WR _IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+
 struct lcdd {
 	struct cdev *cdev;
 	dev_t devt;
@@ -138,7 +143,8 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 	int ret;
 	memset(spi_transfer, 0, sizeof(struct spi_transfer));
 	spi_transfer->tx_buf = bufs->tx;
-	spi_transfer->rx_buf = bufs->rx;
+	if (!transfer->data_cmd)
+		spi_transfer->rx_buf = bufs->rx;
 	ret = copy_from_user(bufs->tx, transfer->buffer, transfer->byte_cnt);
 	if (ret) {
 		spi_transfer->tx_buf = NULL;
@@ -171,7 +177,7 @@ void lcdd_spi_device(struct spi_device *spi)
 	printk("stats = %lu", (unsigned long)spi->controller_state);
 }
 
-static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+static int lcdd_write_data(struct file *file, unsigned long arg) 
 {
 	int ret;
 	struct lcdd_transfer lcdd_transfer;
@@ -202,6 +208,18 @@ static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	}
 	wait_for_completion(&done);
 	return 1;
+}
+
+static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	
+	switch(cmd) {
+	case(SPI_IO_WR_DATA) :
+		return lcdd_write_data(file, arg);
+	default:
+		debug_message();
+		return -EINVAL;
+	}
 }
 
 static struct lcdd lcdd = {
