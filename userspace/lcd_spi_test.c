@@ -229,7 +229,7 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 static int lcd_clear_background(int fd) 
 {
 	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX + 1, HEIGHT_MAX + 1, 0, 
-				  0, 0x3f);
+				  0x0, 0x3f);
 }
 
 int main(int argc, char *argv[])

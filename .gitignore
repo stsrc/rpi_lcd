@@ -1,3 +1,4 @@
+lcd_spi_test
 *.o
 *.ko
 *.mod.c

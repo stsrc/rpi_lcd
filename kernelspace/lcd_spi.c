@@ -12,13 +12,16 @@
 #include <linux/uaccess.h>
 
 #define DRIVER_NAME "lcd_spi"
+#define HEIGHT 320
+#define LENGTH 240
+#define BY_PER_PIX 3
 
-//#ifdef DEBUG
+#ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d\n", __FUNCTION__, \
 			       __LINE__)
-//#else
-//#define debug_message()
-//#endif
+#else
+#define debug_message()
+#endif
 
 struct lcdd {
 	struct cdev *cdev;
@@ -29,24 +32,49 @@ struct lcdd {
 	struct spi_device *spi_device;
 };
 
+struct lcdd_transfer_bufs {
+	uint8_t *tx;
+	uint8_t *rx;
+};
+
 static struct lcdd lcdd;
 
 int lcdd_open(struct inode *inode, struct file *file)
 {
-	spi_dev_put(lcdd.spi_device);
+	struct lcdd_transfer_bufs *bufs = kzalloc(sizeof(struct 
+					lcdd_transfer_bufs), GFP_KERNEL);
+	if (!bufs)
+		return -ENOMEM;
+	bufs->tx = kmalloc(HEIGHT * LENGTH * BY_PER_PIX, GFP_KERNEL);
+	if (!bufs->tx) {
+		kfree(bufs);
+		bufs = NULL;
+		return -ENOMEM;
+	}
+	bufs->rx = kmalloc(HEIGHT * LENGTH * BY_PER_PIX, GFP_KERNEL);
+	if (!bufs->rx) {
+		kfree(bufs->tx);
+		kfree(bufs);
+		bufs = NULL;
+		return -ENOMEM;
+	}
+	file->private_data = bufs;
 	return 0;
 }
 
 int lcdd_release(struct inode *inode, struct file *file)
 {
-	spi_dev_get(lcdd.spi_device);
+	struct lcdd_transfer_bufs *bufs = file->private_data;
+	kfree(bufs->rx);
+	kfree(bufs->tx);
+	kfree(bufs);
 	return 0;
 }	
 
 struct lcdd_transfer {
 	uint32_t byte_cnt;
 	uint8_t data_cmd;
-	const uint8_t __user *bufer;
+	const uint8_t __user *buffer;
 };
 
 
@@ -85,53 +113,39 @@ static inline void lcdd_set_data_cmd_pin(uint8_t data_cmd)
 		gpio_set_value(lcd_gpio[0].gpio, 0);
 }
 
-/*
- * Remember to call kfree when spi_transfer will not be used anymore - function 
- * dynamically alocates memory!
- */
-
-
-static int lcdd_init_spi_transfer(const char __user *message, struct spi_transfer 
-				  *spi_transfer)
-{ 
-	int ret;
-	struct lcdd_transfer transfer;
-	void *temp;
-	memset(spi_transfer, 0, sizeof(struct spi_transfer));
-	ret = copy_from_user((char *)&transfer, message, 
+static int lcdd_parse_user_data(const char __user *message, 
+			        struct lcdd_transfer *transfer)
+{
+	int ret = copy_from_user(transfer, message, 
 			     sizeof(struct lcdd_transfer));
 	if (ret)
 		return -EAGAIN;
-	if (!transfer.byte_cnt) {
+	if (!transfer->byte_cnt) {
 		debug_message();
 		return -EINVAL;
 	}
-	else if (transfer.bufer == NULL) {
+	else if (transfer->buffer == NULL) {
 		debug_message();
 		return -EINVAL;
 	}
-	temp = kmalloc(transfer.byte_cnt, GFP_KERNEL);
-	if (temp == NULL)
-		return -ENOMEM;
-	spi_transfer->rx_buf = kmalloc(transfer.byte_cnt, GFP_KERNEL);
-	if (spi_transfer->rx_buf == NULL) {
-		kfree(temp);
-		spi_transfer->tx_buf = NULL;
-		return -ENOMEM;
-	}
-	//MOVE IT SOMEWHERE ELSE
-	lcdd_set_data_cmd_pin(transfer.data_cmd);
-	ret = copy_from_user(temp, transfer.bufer, transfer.byte_cnt);
+	return 0;
+}
+
+static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer, 
+				  struct spi_transfer *spi_transfer, 
+				  struct lcdd_transfer_bufs *bufs)
+{ 
+	int ret;
+	memset(spi_transfer, 0, sizeof(struct spi_transfer));
+	spi_transfer->tx_buf = bufs->tx;
+	spi_transfer->rx_buf = bufs->rx;
+	ret = copy_from_user(bufs->tx, transfer->buffer, transfer->byte_cnt);
 	if (ret) {
-		kfree(temp);
-		kfree(spi_transfer->rx_buf);
 		spi_transfer->tx_buf = NULL;
 		spi_transfer->rx_buf = NULL;
 		return -EAGAIN;
 	}
-	spi_transfer->tx_buf = temp;
-	spi_transfer->len = transfer.byte_cnt;
-	spi_transfer->speed_hz = 9600;
+	spi_transfer->len = transfer->byte_cnt;
 	return 0;
 }
 
@@ -139,12 +153,6 @@ static int lcdd_init_spi_transfer(const char __user *message, struct spi_transfe
 static void lcdd_complete_transfer(void *context)
 {
 	complete(context);
-}
-
-static inline void lcdd_deinit_spi_transfer(struct spi_transfer *spi_transfer)
-{
-	kfree(spi_transfer->tx_buf);
-	kfree(spi_transfer->rx_buf);
 }
 
 void lcdd_spi_device(struct spi_device *spi)
@@ -166,11 +174,19 @@ void lcdd_spi_device(struct spi_device *spi)
 static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int ret;
+	struct lcdd_transfer lcdd_transfer;
 	struct spi_message spi_message;
 	struct spi_transfer spi_transfer;
 	DECLARE_COMPLETION_ONSTACK(done);
 	spi_message_init(&spi_message);
-	ret = lcdd_init_spi_transfer((const char __user *)arg, &spi_transfer);
+	ret = lcdd_parse_user_data((const char __user *)arg, &lcdd_transfer);
+	if (ret) {
+		debug_message();
+		return ret;
+	}
+	ret = lcdd_init_spi_transfer(&lcdd_transfer, &spi_transfer,
+				     (struct lcdd_transfer_bufs *) 
+				     file->private_data);
 	if (ret) {
 		debug_message();
 		return ret;
@@ -178,18 +194,13 @@ static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	spi_message_add_tail(&spi_transfer, &spi_message);
 	spi_message.complete = lcdd_complete_transfer;
 	spi_message.context = &done;
-	debug_message();	
+	lcdd_set_data_cmd_pin(lcdd_transfer.data_cmd);
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
-		//ok?
 		debug_message();
-		lcdd_deinit_spi_transfer(&spi_transfer);
 		return ret;
 	}
-	debug_message();
 	wait_for_completion(&done);
-	lcdd_deinit_spi_transfer(&spi_transfer);
-	debug_message();
 	return 1;
 }
 
@@ -209,12 +220,12 @@ static const struct of_device_id lcd_spi_dt_ids[] = {
 	{.compatible = DRIVER_NAME },
 	{},
 };
-MODULE_DEVICE_TABLE(of, lcd_spi_dt_ids);
 
+MODULE_DEVICE_TABLE(of, lcd_spi_dt_ids);
 
 static int lcdd_spi_device_set(struct spi_device *spi)
 {
-	spi->max_speed_hz = 50000;
+	spi->max_speed_hz = 32000000;
 	spi->bits_per_word = 8;
 	spi->mode = 0;
 	return spi_setup(spi);	
@@ -223,7 +234,6 @@ static int lcdd_spi_device_set(struct spi_device *spi)
 static int spidev_probe(struct spi_device *spi)
 {
 	int ret;
-	/*TODO: WHAT DOES IT DO?*/
 	if (spi->dev.of_node && !of_match_device(lcd_spi_dt_ids, &spi->dev)) {
 		debug_message();
 		dev_err(&spi->dev, "buggy DT: lcd_spi listed directly in DT\n");
