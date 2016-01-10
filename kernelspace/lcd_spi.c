@@ -10,6 +10,7 @@
 #include <linux/spi/spi.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
+#include <linux/mutex.h>
 
 #define DRIVER_NAME "lcd_spi"
 #define HEIGHT 320
@@ -35,6 +36,7 @@ struct lcdd {
 	struct class *class;
 	struct device *device;
 	struct spi_device *spi_device;
+	struct mutex spi_lock;
 };
 
 struct lcdd_transfer_bufs {
@@ -218,9 +220,11 @@ static int lcdd_write_data(struct file *file, unsigned long arg)
 	struct spi_transfer spi_transfer;
 	DECLARE_COMPLETION_ONSTACK(done);
 	spi_message_init(&spi_message);
+	mutex_lock(&lcdd.spi_lock);
 	ret = lcdd_parse_user_data((const char __user *)arg, &lcdd_transfer);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	ret = lcdd_init_spi_transfer(&lcdd_transfer, &spi_transfer,
@@ -228,6 +232,7 @@ static int lcdd_write_data(struct file *file, unsigned long arg)
 				     file->private_data);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	spi_message_add_tail(&spi_transfer, &spi_message);
@@ -237,9 +242,11 @@ static int lcdd_write_data(struct file *file, unsigned long arg)
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	wait_for_completion(&done);
+	mutex_unlock(&lcdd.spi_lock);
 	return 1;
 }
 
@@ -256,11 +263,13 @@ static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
 		debug_message();
 		return ret;
 	}
+	mutex_lock(&lcdd.spi_lock);
 	ret = lcdd_init_spi_cmd_transfer(&lcdd_transfer, &spi_transfer,
 					 (struct lcdd_transfer_bufs *)
 					 file->private_data);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	spi_message_add_tail(&spi_transfer, &spi_message);
@@ -270,6 +279,7 @@ static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	wait_for_completion(&done);
@@ -278,6 +288,7 @@ static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
 	ret = lcdd_init_spi_data_transfer(&lcdd_transfer, &spi_transfer);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	spi_message_add_tail(&spi_transfer, &spi_message);
@@ -287,9 +298,11 @@ static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
+		mutex_unlock(&lcdd.spi_lock);
 		return ret;
 	}
 	wait_for_completion(&done);
+	mutex_unlock(&lcdd.spi_lock);
 	return 1;
 }	
 
@@ -403,6 +416,7 @@ static int __init lcdd_init(void)
 		cdev_del(lcdd.cdev);
 		goto err;
 	}
+	mutex_init(&lcdd.spi_lock);
 	lcdd_set_gpio();
 	lcdd_reset();
 	return 0;
