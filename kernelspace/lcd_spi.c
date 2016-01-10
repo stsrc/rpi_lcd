@@ -26,7 +26,7 @@
 #define SPI_IOC_MAGIC 'k'
 #define SPI_IO_WR_DATA _IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
 #define SPI_IO_CMD_RD _IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
-#define SPI_IO_CMD_WR _IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+#define SPI_IO_WR_CMD_DATA _IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 
 struct lcdd {
 	struct cdev *cdev;
@@ -156,6 +156,39 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 }
 
 
+static int lcdd_init_spi_cmd_transfer(struct lcdd_transfer *transfer, 
+				      struct spi_transfer *spi_transfer, 
+				      struct lcdd_transfer_bufs *bufs)
+{ 
+	int ret;
+	memset(spi_transfer, 0, sizeof(struct spi_transfer));
+	spi_transfer->tx_buf = bufs->tx;
+	ret = copy_from_user(bufs->tx, transfer->buffer, 1);
+	if (ret) {
+		spi_transfer->tx_buf = NULL;
+		return -EAGAIN;
+	}
+	spi_transfer->len = 1;
+	return 0;
+}
+
+static int lcdd_init_spi_data_transfer(struct lcdd_transfer *transfer, 
+				      struct spi_transfer *spi_transfer)
+{ 
+	int ret;
+	ret = copy_from_user((void *)spi_transfer->tx_buf, 
+			     (transfer->buffer + 1), transfer->byte_cnt - 1);
+	if (ret) {
+		spi_transfer->tx_buf = NULL;
+		return -EAGAIN;
+	}
+	spi_transfer->len = transfer->byte_cnt - 1;
+	if (!spi_transfer->len)
+		return -EINVAL;
+	else
+		return 0;
+}
+
 static void lcdd_complete_transfer(void *context)
 {
 	complete(context);
@@ -210,16 +243,69 @@ static int lcdd_write_data(struct file *file, unsigned long arg)
 	return 1;
 }
 
+static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
+{
+	int ret;
+	struct lcdd_transfer lcdd_transfer;
+	struct spi_message spi_message;
+	struct spi_transfer spi_transfer;
+	DECLARE_COMPLETION_ONSTACK(done);
+	spi_message_init(&spi_message);
+	ret = lcdd_parse_user_data((const char __user*)arg, &lcdd_transfer);
+	if (ret) {
+		debug_message();
+		return ret;
+	}
+	ret = lcdd_init_spi_cmd_transfer(&lcdd_transfer, &spi_transfer,
+					 (struct lcdd_transfer_bufs *)
+					 file->private_data);
+	if (ret) {
+		debug_message();
+		return ret;
+	}
+	spi_message_add_tail(&spi_transfer, &spi_message);
+	spi_message.complete = lcdd_complete_transfer;
+	spi_message.context = &done;
+	lcdd_set_data_cmd_pin(0);
+	ret = spi_async(lcdd.spi_device, &spi_message);
+	if (ret) {
+		debug_message();
+		return ret;
+	}
+	wait_for_completion(&done);
+	spi_message_init(&spi_message);
+	reinit_completion(&done);
+	ret = lcdd_init_spi_data_transfer(&lcdd_transfer, &spi_transfer);
+	if (ret) {
+		debug_message();
+		return ret;
+	}
+	spi_message_add_tail(&spi_transfer, &spi_message);
+	spi_message.complete = lcdd_complete_transfer;
+	spi_message.context = &done;
+	lcdd_set_data_cmd_pin(1);
+	ret = spi_async(lcdd.spi_device, &spi_message);
+	if (ret) {
+		debug_message();
+		return ret;
+	}
+	wait_for_completion(&done);
+	return 1;
+}	
+
 static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	
 	switch(cmd) {
 	case(SPI_IO_WR_DATA) :
-		return lcdd_write_data(file, arg);
+		return lcdd_write_data(file, arg);	
+	case(SPI_IO_WR_CMD_DATA) :
+		return lcdd_write_cmd_data(file, arg);
 	default:
 		debug_message();
 		return -EINVAL;
 	}
+
 }
 
 static struct lcdd lcdd = {
