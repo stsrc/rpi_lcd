@@ -25,14 +25,13 @@ static void pabort(const char *s)
 
 static const char *device = "/dev/lcd_spi";
 
-static void transfer(int fd, uint8_t data_cmd, uint8_t *tx, 
+static void transfer(int fd, uint8_t *tx, 
 		     uint8_t *rx, uint32_t n, unsigned int
 		     cmd)
 {
 	int ret;
 	struct lcdd_transfer tr = {
 		.byte_cnt = n,
-		.data_cmd = data_cmd,
 		.tx_buf = tx,
 	};
 	ret = ioctl(fd, cmd, &tr);
@@ -99,11 +98,11 @@ static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 	va_end(arg_list);
 	
 	if (arg_cnt != 1) {
-		transfer(fd, 1, tx, rx, arg_cnt, SPI_IO_WR_CMD_DATA);
+		transfer(fd, tx, rx, arg_cnt, SPI_IO_WR_CMD_DATA);
 		free(tx);
 		free(rx);
 	} else {
-		transfer(fd, 0, &cmd, &temp, 1, SPI_IO_WR_DATA);
+		transfer(fd, &cmd, &temp, 1, SPI_IO_WR_CMD);
 	}
 	return 0;
 }
@@ -117,7 +116,7 @@ int transfer_rd_d(int fd, int n, uint8_t cmd)
 	memset(tx, 0, n);
 	memset(rx, 0, n);
 	tx[0] = cmd;
-	transfer(fd, 0, tx, rx, n, SPI_IO_WR_DATA);
+	transfer(fd, tx, rx, n, SPI_IO_WR_CMD);
 	print_transfer(1, tx, rx, n);
 	free(tx);
 	free(rx);
@@ -159,17 +158,17 @@ static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *you
 
 static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 {
-	const uint32_t single_wr_max = 255*2;
+	const uint32_t single_wr_max = 240 * 320 * 3;
 	uint32_t written = 0;
 	transfer_wr_cmdd(fd, 1, 0x2C);
 	while (mem_size >= single_wr_max) {
-		transfer(fd, 1, &tx[written], &rx[written], single_wr_max, 
+		transfer(fd, &tx[written], &rx[written], single_wr_max, 
 			 SPI_IO_WR_DATA);
 		written += single_wr_max;
 		mem_size -= single_wr_max;
 	}
 	if (mem_size != 0)
-	transfer(fd, 1, &tx[written], &rx[written], mem_size, SPI_IO_WR_DATA);
+	transfer(fd, &tx[written], &rx[written], mem_size, SPI_IO_WR_DATA);
 }
 
 static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,

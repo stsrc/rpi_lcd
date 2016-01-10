@@ -25,9 +25,9 @@
 #endif
 
 #define SPI_IOC_MAGIC 'k'
-#define SPI_IO_WR_DATA _IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
-#define SPI_IO_CMD_RD _IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
-#define SPI_IO_WR_CMD_DATA _IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+#define SPI_IO_WR_DATA		_IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
+#define SPI_IO_WR_CMD_DATA	_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+#define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
 
 struct lcdd {
 	struct cdev *cdev;
@@ -80,7 +80,6 @@ int lcdd_release(struct inode *inode, struct file *file)
 
 struct lcdd_transfer {
 	uint32_t byte_cnt;
-	uint8_t data_cmd;
 	const uint8_t __user *buffer;
 };
 
@@ -145,8 +144,6 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 	int ret;
 	memset(spi_transfer, 0, sizeof(struct spi_transfer));
 	spi_transfer->tx_buf = bufs->tx;
-	if (!transfer->data_cmd)
-		spi_transfer->rx_buf = bufs->rx;
 	ret = copy_from_user(bufs->tx, transfer->buffer, transfer->byte_cnt);
 	if (ret) {
 		spi_transfer->tx_buf = NULL;
@@ -212,7 +209,7 @@ void lcdd_spi_device(struct spi_device *spi)
 	printk("stats = %lu", (unsigned long)spi->controller_state);
 }
 
-static int lcdd_write_data(struct file *file, unsigned long arg) 
+static int lcdd_write(struct file *file, unsigned long arg, uint8_t data_cmd) 
 {
 	int ret;
 	struct lcdd_transfer lcdd_transfer;
@@ -238,7 +235,7 @@ static int lcdd_write_data(struct file *file, unsigned long arg)
 	spi_message_add_tail(&spi_transfer, &spi_message);
 	spi_message.complete = lcdd_complete_transfer;
 	spi_message.context = &done;
-	lcdd_set_data_cmd_pin(lcdd_transfer.data_cmd);
+	lcdd_set_data_cmd_pin(data_cmd);
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
@@ -311,9 +308,11 @@ static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	
 	switch(cmd) {
 	case(SPI_IO_WR_DATA) :
-		return lcdd_write_data(file, arg);	
+		return lcdd_write(file, arg, 1);	
 	case(SPI_IO_WR_CMD_DATA) :
 		return lcdd_write_cmd_data(file, arg);
+	case(SPI_IO_WR_CMD) :
+		return lcdd_write(file, arg, 0);
 	default:
 		debug_message();
 		return -EINVAL;
