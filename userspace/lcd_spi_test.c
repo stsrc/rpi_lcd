@@ -33,6 +33,7 @@ static void transfer(int fd, uint8_t *tx,
 	struct lcdd_transfer tr = {
 		.byte_cnt = n,
 		.tx_buf = tx,
+		.rx_buf = rx
 	};
 	ret = ioctl(fd, cmd, &tr);
 	if (ret < 1)
@@ -65,9 +66,9 @@ static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint32_t n)
 	}
 }
 
-static uint8_t check_clean_mem(void *tx, void *rx) 
+static uint8_t check_clean_mem(void *tx, void *rx, int check_rx) 
 {
-	if (tx == NULL || rx == NULL) {
+	if (tx == NULL || (check_rx && rx == NULL)) {
 		if (tx != NULL)
 			free(tx);
 		else if (rx != NULL)
@@ -80,12 +81,11 @@ static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 {
 	va_list arg_list;
 	uint8_t cmd;
-	uint8_t temp;
 	uint8_t *tx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
-	uint8_t *rx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
+	uint8_t *rx = NULL;
 	
 	if (arg_cnt != 1) {
-		if (check_clean_mem(tx, rx))
+		if (check_clean_mem(tx, rx, 0))
 			pabort("No mem.");
 	}
 
@@ -102,7 +102,7 @@ static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
 		free(tx);
 		free(rx);
 	} else {
-		transfer(fd, &cmd, &temp, 1, SPI_IO_WR_CMD);
+		transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
 	}
 	return 0;
 }
@@ -111,12 +111,12 @@ int transfer_rd_d(int fd, int n, uint8_t cmd)
 {
 	uint8_t *tx = malloc(n);
 	uint8_t *rx = malloc(n);
-	if (check_clean_mem(tx, rx))
+	if (check_clean_mem(tx, rx, 1))
 		pabort("No mem.");
 	memset(tx, 0, n);
 	memset(rx, 0, n);
 	tx[0] = cmd;
-	transfer(fd, tx, rx, n, SPI_IO_WR_CMD);
+	transfer(fd, tx, rx, n, SPI_IO_RD_CMD);
 	print_transfer(1, tx, rx, n);
 	free(tx);
 	free(rx);
@@ -133,6 +133,7 @@ static void lcd_init(int fd)
 	nanosleep(&req, NULL);
 	/* Display OFF*/
 	transfer_wr_cmdd(fd, 1, 0x28);
+	transfer_rd_d(fd, 6, 0x09);
 	/*Display ON*/
 	transfer_wr_cmdd(fd, 1, 0x29);
 	/*Display sleep out*/
@@ -141,12 +142,14 @@ static void lcd_init(int fd)
 	nanosleep(&req, NULL);
 	/*Pixel format set - 18bits/pixel*/
 	transfer_wr_cmdd(fd, 2, 0x3A, 0b01100110);
+	req.tv_nsec = 120000000;
 	/*Brightness control block on*/
 	transfer_wr_cmdd(fd, 2, 0x53, 0b00101100);
-	nanosleep(&req, NULL); //5ms
+	nanosleep(&req, NULL); //120ms
 	/*Display brightness - 0xff*/
 	transfer_wr_cmdd(fd, 2, 0x51, 0xFF);
-	nanosleep(&req, NULL); //5ms
+	nanosleep(&req, NULL); //120ms
+	transfer_rd_d(fd, 6, 0x09);
 }
 
 static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *younger)
@@ -158,17 +161,17 @@ static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *you
 
 static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 {
-	const uint32_t single_wr_max = 240 * 320 * 3;
+	const uint32_t single_wr_max = 255 * 2;
 	uint32_t written = 0;
 	transfer_wr_cmdd(fd, 1, 0x2C);
 	while (mem_size >= single_wr_max) {
-		transfer(fd, &tx[written], &rx[written], single_wr_max, 
+		transfer(fd, &tx[written], NULL, single_wr_max, 
 			 SPI_IO_WR_DATA);
 		written += single_wr_max;
 		mem_size -= single_wr_max;
 	}
 	if (mem_size != 0)
-	transfer(fd, &tx[written], &rx[written], mem_size, SPI_IO_WR_DATA);
+	transfer(fd, &tx[written], NULL, mem_size, SPI_IO_WR_DATA);
 }
 
 static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
@@ -213,8 +216,7 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	mem_size = 3 * height * length; // 3 bytes (RGB) * pixel cnt
 	tx = malloc(mem_size);
 	memset(tx, 0x50 << 2, mem_size);
-	rx = malloc(mem_size);//do I need it?
-	if (check_clean_mem(tx, rx))
+	if (check_clean_mem(tx, rx, 0))
 		pabort("No memory.");
 	lcd_set_rectangle(fd, x, y, height, length);
 	if (lcd_fill_rect_with_colour(tx, mem_size, red, green, blue)) {
