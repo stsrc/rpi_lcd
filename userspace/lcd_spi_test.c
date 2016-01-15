@@ -12,8 +12,9 @@
 
 #include <time.h>
 
-#define LENGTH_MAX 239
-#define HEIGHT_MAX 319
+#define LENGTH_MAX 240
+#define HEIGHT_MAX 320
+#define BY_PER_PIX 2
 
 #include "lcd_spi.h"
 
@@ -77,33 +78,41 @@ static uint8_t check_clean_mem(void *tx, void *rx, int check_rx)
 	}
 	return 0;
 }
-static int transfer_wr_cmdd(int fd, int arg_cnt, ... )
+
+static inline int transfer_wr_cmd(int fd, uint8_t cmd)
+{
+	transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
+	return 0;
+}
+
+static int transfer_wr_cmd_data(int fd, int arg_cnt, ... )
 {
 	va_list arg_list;
 	uint8_t cmd;
-	uint8_t *tx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
-	uint8_t *rx = NULL;
+	uint8_t *tx = NULL;
 	
-	if (arg_cnt != 1) {
-		if (check_clean_mem(tx, rx, 0))
-			pabort("No mem.");
-	}
-
 	va_start(arg_list, arg_cnt);
 	cmd = va_arg(arg_list, int);
 
-	for (int i = 0; i < arg_cnt - 1; i++) 
+	if (arg_cnt == 1) {
+		transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
+		va_end(arg_list);
+		return 0;
+	}
+
+	tx = malloc(sizeof(uint8_t)*(arg_cnt));
+	if (check_clean_mem(tx, NULL, 0))
+		pabort("No mem.");
+	tx[0] = cmd;
+	for (int i = 1; i < arg_cnt; i++) 
 		tx[i] = va_arg(arg_list, int);
+	
+//	for (int i = 0; i < arg_cnt; i++)
+//		printf("Userspace: 0x%02x\n", tx[i]);
 
 	va_end(arg_list);
-	
-	if (arg_cnt != 1) {
-		transfer(fd, tx, rx, arg_cnt, SPI_IO_WR_CMD_DATA);
-		free(tx);
-		free(rx);
-	} else {
-		transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
-	}
+	transfer(fd, tx, NULL, arg_cnt, SPI_IO_WR_CMD_DATA);
+	free(tx);
 	return 0;
 }
 
@@ -113,7 +122,7 @@ int transfer_rd_d(int fd, int n, uint8_t cmd)
 	uint8_t *rx = malloc(n);
 	if (check_clean_mem(tx, rx, 1))
 		pabort("No mem.");
-	memset(tx, 0, n);
+	memset(tx, 0xFF, n);
 	memset(rx, 0, n);
 	tx[0] = cmd;
 	transfer(fd, tx, rx, n, SPI_IO_RD_CMD);
@@ -127,29 +136,28 @@ static void lcd_init(int fd)
 {
 	struct timespec req;
 	/*Reset*/
-	transfer_wr_cmdd(fd, 1, 0x01);
+	transfer_wr_cmd(fd, 0x01);
 	req.tv_sec = 0;
 	req.tv_nsec = 120000000; //120ms.	
 	nanosleep(&req, NULL);
 	/* Display OFF*/
-	transfer_wr_cmdd(fd, 1, 0x28);
-	transfer_rd_d(fd, 6, 0x09);
+	transfer_wr_cmd(fd, 0x28);
 	/*Display ON*/
-	transfer_wr_cmdd(fd, 1, 0x29);
+	transfer_wr_cmd(fd, 0x29);
 	/*Display sleep out*/
-	transfer_wr_cmdd(fd, 1, 0x11);
+	transfer_wr_cmd(fd, 0x11);
 	req.tv_nsec = 5000000; //5ms
 	nanosleep(&req, NULL);
-	/*Pixel format set - 18bits/pixel*/
-	transfer_wr_cmdd(fd, 2, 0x3A, 0b01100110);
+	/*Pixel format set - 16bits/pixel*/
+	transfer_wr_cmd_data(fd, 2, 0x3A, 0x55);
 	req.tv_nsec = 120000000;
+	nanosleep(&req, NULL);
 	/*Brightness control block on*/
-	transfer_wr_cmdd(fd, 2, 0x53, 0b00101100);
+	transfer_wr_cmd_data(fd, 2, 0x53, 0x2C);
 	nanosleep(&req, NULL); //120ms
 	/*Display brightness - 0xff*/
-	transfer_wr_cmdd(fd, 2, 0x51, 0xFF);
+	transfer_wr_cmd_data(fd, 2, 0x51, 0x12);
 	nanosleep(&req, NULL); //120ms
-	transfer_rd_d(fd, 6, 0x09);
 }
 
 static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *younger)
@@ -163,7 +171,7 @@ static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 {
 	const uint32_t single_wr_max = 255 * 2;
 	uint32_t written = 0;
-	transfer_wr_cmdd(fd, 1, 0x2C);
+	transfer_wr_cmd(fd, 0x2C);
 	while (mem_size >= single_wr_max) {
 		transfer(fd, &tx[written], NULL, single_wr_max, 
 			 SPI_IO_WR_DATA);
@@ -180,24 +188,47 @@ static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
 	uint8_t byte[4];
 	lcd_create_bytes(x, &byte[0], &byte[1]);
 	lcd_create_bytes(x + length, &byte[2], &byte[3]);
-	transfer_wr_cmdd(fd, 5, 0x2A, byte[0], byte[1], byte[2], byte[3]);
+	transfer_wr_cmd_data(fd, 5, 0x2A, byte[0], byte[1], byte[2], byte[3]);
 	lcd_create_bytes(y, &byte[0], &byte[1]);
 	lcd_create_bytes(y + height, &byte[2], &byte[3]);
-	transfer_wr_cmdd(fd, 5, 0x2B, byte[0], byte[1], byte[2], byte[3]);
+	transfer_wr_cmd_data(fd, 5, 0x2B, byte[0], byte[1], byte[2], byte[3]);
+}
+
+static int lcd_colour_test(const uint8_t red, const uint8_t green, const 
+			   uint8_t blue)
+{
+	const uint8_t rb_max = 31;
+	const uint8_t g_max = 63;
+
+	if ((red > rb_max) || (blue > rb_max))
+		return 1;
+	else if (green > g_max)
+		return 1;
+	else
+		return 0;
+}
+
+static void lcd_colour_prepare(const uint8_t red, const uint8_t green, const
+			       uint8_t blue, uint8_t *tx)
+{
+	uint8_t first = 0;
+	uint8_t second = 0;
+	first = red << 3;
+	first |= ((green & 0b00111000) >> 3);
+	second = ((green & 0b00000111) << 5);
+	second |= blue;
+	*tx = first;
+	*(tx + 1) = second;
 }
 
 static int lcd_fill_rect_with_colour(uint8_t *tx, const uint32_t mem_size, 
 				     const uint8_t red, const uint8_t green,
 				     const uint8_t blue)
 {
-	const uint8_t col_max = 0x3F; //each colour may have only 6 bit value. 
-	const uint8_t colors_in_pix = 3;
-	if (red > col_max || green > col_max || blue > col_max)
+	if (lcd_colour_test(red, green, blue))
 		return 1;
-	for(uint32_t i = 0; i < mem_size; i += colors_in_pix) {
-		tx[i] = (blue << 2);	
-		tx[i+1] = (green << 2);
-		tx[i+2] = (red << 2);
+	for(uint32_t i = 0; i < mem_size; i += BY_PER_PIX) {
+		lcd_colour_prepare(red, green, blue, &tx[i]);
 	}
 	return 0;
 }
@@ -209,11 +240,11 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	uint8_t *tx;
 	uint8_t *rx = NULL;
 	uint32_t mem_size;
-	if (x + length > LENGTH_MAX + 1)
+	if (x + length > LENGTH_MAX)
 		pabort("Wrong parameters");
-	else if (y + height > HEIGHT_MAX + 1)
+	else if (y + height > HEIGHT_MAX)
 		pabort("Wrong parameters");
-	mem_size = 3 * height * length; // 3 bytes (RGB) * pixel cnt
+	mem_size = BY_PER_PIX * height * length;
 	tx = malloc(mem_size);
 	memset(tx, 0x50 << 2, mem_size);
 	if (check_clean_mem(tx, rx, 0))
@@ -229,10 +260,11 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	free(tx);
 	return 0;
 }
-static int lcd_clear_background(int fd) 
+
+int lcd_clear_background(int fd) 
 {
-	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX + 1, HEIGHT_MAX + 1, 0x30, 
-				  0x0, 0x3f);
+	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX, 31, 
+				  0, 0);
 }
 
 int main(int argc, char *argv[])

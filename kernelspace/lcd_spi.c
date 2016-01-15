@@ -15,7 +15,7 @@
 #define DRIVER_NAME "lcd_spi"
 #define HEIGHT 320
 #define LENGTH 240
-#define BY_PER_PIX 3
+#define BY_PER_PIX 2
 
 #ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d\n", __FUNCTION__, \
@@ -153,10 +153,8 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 		return -EAGAIN;
 	}
 	spi_transfer->len = transfer->byte_cnt;
-	if (transfer->rx) {
-		debug_message();
+	if (transfer->rx)
 		spi_transfer->rx_buf = bufs->rx;
-	}
 	return 0;
 }
 
@@ -178,7 +176,7 @@ static int lcdd_init_spi_cmd_transfer(struct lcdd_transfer *transfer,
 }
 
 static int lcdd_init_spi_data_transfer(struct lcdd_transfer *transfer, 
-				      struct spi_transfer *spi_transfer)
+				       struct spi_transfer *spi_transfer)
 { 
 	int ret;
 	ret = copy_from_user((void *)spi_transfer->tx_buf, 
@@ -188,6 +186,8 @@ static int lcdd_init_spi_data_transfer(struct lcdd_transfer *transfer,
 		return -EAGAIN;
 	}
 	spi_transfer->len = transfer->byte_cnt - 1;
+	//for (int i = 0; i < spi_transfer->len; i++)
+	//	printk(KERN_EMERG "0x%02x\n", ((uint8_t *)spi_transfer->tx_buf)[i]);
 	if (!spi_transfer->len)
 		return -EINVAL;
 	else
@@ -298,8 +298,7 @@ static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
 }	
 
 static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-	
+{	
 	switch(cmd) {
 	case(SPI_IO_WR_DATA) :
 		return lcdd_write(file, arg, 1);	
