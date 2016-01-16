@@ -21,6 +21,9 @@
 #include <errno.h>
 #include <time.h>
 #include <linux/types.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
 
 #define LENGTH_MAX 240
 #define HEIGHT_MAX 320
@@ -33,9 +36,26 @@ struct lcdd_transfer {
 	uint8_t *rx_buf;
 };	
 
+struct ipc_buffer {
+	int cmd;
+	uint8_t *mem;
+	uint16_t x;
+	uint16_t y;
+	uint16_t dx;
+	uint16_t dy;
+};
+
+/*
+ * ALL PROBLEMS WITH ALLIGNMENT - GET INFORMATIONS!
+ */
+
 #define SPI_IOC_MAGIC			'k'
 #define SPI_IO_WR_DATA		_IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
 #define SPI_IO_WR_CMD_DATA	_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 #define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
+
+#define WRITE_TEXT	0
+#define PRINT		1
+
 #endif /* SPIDEV_H */
