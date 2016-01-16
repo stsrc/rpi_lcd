@@ -24,6 +24,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <errno.h>
 
 #define LENGTH_MAX 240
 #define HEIGHT_MAX 320
@@ -56,6 +57,6 @@ struct ipc_buffer {
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
 
 #define WRITE_TEXT	0
-#define PRINT		1
+#define WRITE_BITMAP	1
 
 #endif /* SPIDEV_H */

@@ -216,7 +216,6 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 			      uint8_t blue)
 {
 	uint8_t *tx;
-	uint8_t *rx = NULL;
 	uint32_t mem_size;
 	if (x + length > LENGTH_MAX)
 		pabort("Wrong parameters");
@@ -225,23 +224,29 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	mem_size = BY_PER_PIX * height * length;
 	tx = malloc(mem_size);
 	memset(tx, 0, mem_size);
-	if (check_clean_mem(tx, rx, 0))
+	if (check_clean_mem(tx, NULL, 0))
 		pabort("No memory.");
 	lcd_set_rectangle(fd, x, y, height, length);
 	if (lcd_fill_rect_with_colour(tx, mem_size, red, green, blue)) {
 		free(tx);
-		free(rx);
 		pabort("Wrong colours.");
 	}
-	lcd_draw(fd, tx, rx, mem_size);
-	free(rx);
+	lcd_draw(fd, tx, NULL, mem_size);
 	free(tx);
 	return 0;
 }
 
 static int lcd_draw_bitmap(int fd, struct ipc_buffer *buf)
 {
-	lcd_draw_rectangle(fd, 0, 0, 100, 100, 20, 0, 0);
+	if (buf->x + buf->dx > LENGTH_MAX) {
+		errno = -EINVAL;
+		return -1;
+	} else if (buf->y + buf->dy > LENGTH_MAX) {
+		errno = -EINVAL;
+		return -1;
+	}
+	lcd_set_rectangle(fd, buf->x, buf->y, buf->dx, buf->dy);
+	lcd_draw(fd, buf->mem, NULL, BY_PER_PIX*buf->dx*buf->dy);
 	return 0;
 }
 
@@ -316,12 +321,15 @@ static int ipc_action(int fd, int socket, struct sockaddr_un *connected,
 {
 	int ret;
 	ret = recv(socket, &(buf->cmd), sizeof(buf->cmd), MSG_WAITALL);
-	if (ret != sizeof(buf->cmd))
+	printf("recv: %d\n", buf->cmd);
+	if (ret != sizeof(buf->cmd)) {
+		printf("Bug\n");
 		return 1;
+	}
 	switch(buf->cmd) {
 	case WRITE_TEXT:
 		return ipc_write_text(socket, connected, buf);
-	case PRINT:
+	case WRITE_BITMAP:
 		return ipc_draw_bitmap(fd, socket, connected, buf);
 	}
 	return 1;
@@ -333,22 +341,32 @@ static int ipc_main(int fd)
 	int ret, server_socket, client_socket;
 	struct ipc_buffer buf;
 	buf.mem = malloc(TOT_MEM_SIZE);
-	if (!buf.mem)	
+	if (!buf.mem) {	
+		perror("malloc");
 		return 1;
+	}
 	ret = ipc_make(&server_socket, &server);
-	if (ret)
+	if (ret) {
+		perror("ipc_make");
 		goto err;
+	}
 	while(1) {
 		client_socket = ipc_accept(server_socket, &server, &client);
-		if (client_socket < 0)
+		if (client_socket < 0) {
+			perror("ipc_accept");
 			goto err;
+		}
 		ret = ipc_action(fd, client_socket, &client, &buf);
-		if (ret)
+		if (ret) {
+			perror("ipc_action");
 			goto err;
+		}
 		close(client_socket);
 	}
+	close(server_socket);
+	return 0;
 err:
-	perror("ipc_main");
+	close(client_socket);
 	close(server_socket);
 	return ret;
 }
