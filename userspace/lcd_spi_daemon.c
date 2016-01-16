@@ -263,11 +263,6 @@ static inline void ipc_prepare_struct(struct sockaddr_un *local)
 	unlink(local->sun_path);
 }
 
-static inline void ipc_clean_close(struct sockaddr_un *local)
-{
-	unlink(local->sun_path);	
-}
-
 static int ipc_make(int *socket, struct sockaddr_un *local) {
 	int ret;
 	ipc_prepare_struct(local);
@@ -332,7 +327,7 @@ static int ipc_action(int fd, int socket, struct sockaddr_un *connected,
 	return 1;
 }
 
-static int ipc(int fd)
+static int ipc_main(int fd)
 {
 	struct sockaddr_un server, client;
 	int ret, server_socket, client_socket;
@@ -342,7 +337,7 @@ static int ipc(int fd)
 		return 1;
 	ret = ipc_make(&server_socket, &server);
 	if (ret)
-		return ret;
+		goto err;
 	while(1) {
 		client_socket = ipc_accept(server_socket, &server, &client);
 		if (client_socket < 0)
@@ -353,6 +348,7 @@ static int ipc(int fd)
 		close(client_socket);
 	}
 err:
+	perror("ipc_main");
 	close(server_socket);
 	return ret;
 }
@@ -372,7 +368,7 @@ int main(int argc, char *argv[])
 		pabort("can't open device");
 	lcd_init(fd);
 	lcd_clear_background(fd);
-	ipc(fd);
+	ipc_main(fd);
 	close(fd);
 	return ret;
 }

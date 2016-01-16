@@ -1,4 +1,5 @@
 lcd_spi_test
+lcd_spi_client
 *.o
 *.ko
 *.mod.c
