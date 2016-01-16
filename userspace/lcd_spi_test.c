@@ -1,21 +1,3 @@
-#include <stdint.h>
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <getopt.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/types.h>
-#include <string.h>
-#include <stdarg.h>
-#include <errno.h>
-
-#include <time.h>
-
-#define LENGTH_MAX 240
-#define HEIGHT_MAX 320
-#define BY_PER_PIX 2
-
 #include "lcd_spi.h"
 
 static void pabort(const char *s)
@@ -107,9 +89,6 @@ static int transfer_wr_cmd_data(int fd, int arg_cnt, ... )
 	for (int i = 1; i < arg_cnt; i++) 
 		tx[i] = va_arg(arg_list, int);
 	
-//	for (int i = 0; i < arg_cnt; i++)
-//		printf("Userspace: 0x%02x\n", tx[i]);
-
 	va_end(arg_list);
 	transfer(fd, tx, NULL, arg_cnt, SPI_IO_WR_CMD_DATA);
 	free(tx);
@@ -140,8 +119,6 @@ static void lcd_init(int fd)
 	req.tv_sec = 0;
 	req.tv_nsec = 120000000; //120ms.	
 	nanosleep(&req, NULL);
-	/* Display OFF*/
-	transfer_wr_cmd(fd, 0x28);
 	/*Display ON*/
 	transfer_wr_cmd(fd, 0x29);
 	/*Display sleep out*/
@@ -150,6 +127,8 @@ static void lcd_init(int fd)
 	nanosleep(&req, NULL);
 	/*Pixel format set - 16bits/pixel*/
 	transfer_wr_cmd_data(fd, 2, 0x3A, 0x55);
+	/*RGB-BGR Order*/
+	transfer_wr_cmd_data(fd, 2, 0x36, 0b00001000);
 	req.tv_nsec = 120000000;
 	nanosleep(&req, NULL);
 	/*Brightness control block on*/
@@ -169,7 +148,7 @@ static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *you
 
 static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 {
-	const uint32_t single_wr_max = 255 * 2;
+	const uint32_t single_wr_max = TOT_MEM_SIZE;
 	uint32_t written = 0;
 	transfer_wr_cmd(fd, 0x2C);
 	while (mem_size >= single_wr_max) {
@@ -208,8 +187,8 @@ static int lcd_colour_test(const uint8_t red, const uint8_t green, const
 		return 0;
 }
 
-static void lcd_colour_prepare(const uint8_t red, const uint8_t green, const
-			       uint8_t blue, uint8_t *tx)
+static inline void lcd_colour_prepare(const uint8_t red, const uint8_t green, 
+				      const uint8_t blue, uint8_t *tx)
 {
 	uint8_t first = 0;
 	uint8_t second = 0;
@@ -227,9 +206,8 @@ static int lcd_fill_rect_with_colour(uint8_t *tx, const uint32_t mem_size,
 {
 	if (lcd_colour_test(red, green, blue))
 		return 1;
-	for(uint32_t i = 0; i < mem_size; i += BY_PER_PIX) {
+	for (uint32_t i = 0; i < mem_size; i += BY_PER_PIX) 
 		lcd_colour_prepare(red, green, blue, &tx[i]);
-	}
 	return 0;
 }
 
@@ -246,7 +224,7 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 		pabort("Wrong parameters");
 	mem_size = BY_PER_PIX * height * length;
 	tx = malloc(mem_size);
-	memset(tx, 0x50 << 2, mem_size);
+	memset(tx, 0, mem_size);
 	if (check_clean_mem(tx, rx, 0))
 		pabort("No memory.");
 	lcd_set_rectangle(fd, x, y, height, length);
@@ -263,8 +241,8 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 
 int lcd_clear_background(int fd) 
 {
-	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX, 31, 
-				  0, 0);
+	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX, 15, 
+				  63, 0);
 }
 
 int main(int argc, char *argv[])
@@ -275,7 +253,6 @@ int main(int argc, char *argv[])
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		pabort("can't open device");
-
 	lcd_init(fd);
 	lcd_clear_background(fd);
 

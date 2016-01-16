@@ -8,3 +8,4 @@ lcd_spi_test
 *cmd
 spidev_test
 *.swp
+fonts/*

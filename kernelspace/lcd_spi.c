@@ -153,8 +153,7 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 		return -EAGAIN;
 	}
 	spi_transfer->len = transfer->byte_cnt;
-	if (transfer->rx)
-		spi_transfer->rx_buf = bufs->rx;
+	spi_transfer->rx_buf = bufs->rx;
 	return 0;
 }
 
@@ -336,7 +335,7 @@ MODULE_DEVICE_TABLE(of, lcd_spi_dt_ids);
 
 static int lcdd_spi_device_set(struct spi_device *spi)
 {
-	spi->max_speed_hz = 320000;
+	spi->max_speed_hz = 32000000;
 	spi->bits_per_word = 8;
 	spi->mode = 0;
 	return spi_setup(spi);	
