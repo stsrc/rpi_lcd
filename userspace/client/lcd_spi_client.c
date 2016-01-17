@@ -8,6 +8,10 @@ static int ipc_make_message(struct ipc_buffer *buf)
 	if (buf->mem == NULL)
 		return 1;
 	memset(buf->mem, 0b11100000, TOT_MEM_SIZE);
+	buf->x = 0;
+	buf->y = 0;
+	buf->dx = LENGTH_MAX;
+	buf->dy = HEIGHT_MAX;
 	return 0;
 }
 
@@ -51,7 +55,7 @@ int main(void)
 		perror("send");
 		return 1;
 	}
-	ret = send(sckt, buf.mem, TOT_MEM_SIZE, 0);
+	ret = send(sckt, buf.mem, BY_PER_PIX*buf.dx*buf.dy, 0);
 	if (ret < 0)
 		perror("send");
 	free(buf.mem);

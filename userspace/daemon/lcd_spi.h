@@ -26,6 +26,8 @@
 #include <sys/un.h>
 #include <errno.h>
 
+#include "ipc.h"
+
 #define LENGTH_MAX 240
 #define HEIGHT_MAX 320
 #define BY_PER_PIX 2
@@ -37,19 +39,6 @@ struct lcdd_transfer {
 	uint8_t *rx_buf;
 };	
 
-struct ipc_buffer {
-	int cmd;
-	uint8_t *mem;
-	uint16_t x;
-	uint16_t y;
-	uint16_t dx;
-	uint16_t dy;
-};
-
-/*
- * ALL PROBLEMS WITH ALLIGNMENT - GET INFORMATIONS!
- */
-
 #define SPI_IOC_MAGIC			'k'
 #define SPI_IO_WR_DATA		_IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
 #define SPI_IO_WR_CMD_DATA	_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
@@ -58,5 +47,7 @@ struct ipc_buffer {
 
 #define WRITE_TEXT	0
 #define WRITE_BITMAP	1
+
+int lcd_draw_bitmap(int fd, struct ipc_buffer *buf);
 
 #endif /* SPIDEV_H */
