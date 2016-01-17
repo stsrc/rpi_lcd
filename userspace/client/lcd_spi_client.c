@@ -2,15 +2,17 @@
 
 static int ipc_make_message(struct ipc_buffer *buf)
 {
+	char *text = "Raz, dwa, trzy, cztery\0";
 	memset(buf, 0, sizeof(struct ipc_buffer));
-	buf->cmd = WRITE_BITMAP;
+	buf->cmd = WRITE_TEXT;
 	buf->mem = malloc(TOT_MEM_SIZE);
 	if (buf->mem == NULL)
 		return 1;
-	memset(buf->mem, 0b11100000, TOT_MEM_SIZE);
+	memset(buf->mem, 0, TOT_MEM_SIZE);
+	strcpy((char *)buf->mem, text);
 	buf->x = 0;
 	buf->y = 0;
-	buf->dx = LENGTH_MAX;
+	buf->dx = strlen(text);
 	buf->dy = HEIGHT_MAX;
 	return 0;
 }
@@ -55,7 +57,7 @@ int main(void)
 		perror("send");
 		return 1;
 	}
-	ret = send(sckt, buf.mem, BY_PER_PIX*buf.dx*buf.dy, 0);
+	ret = send(sckt, buf.mem, buf.dx, 0);
 	if (ret < 0)
 		perror("send");
 	free(buf.mem);

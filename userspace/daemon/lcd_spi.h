@@ -49,5 +49,7 @@ struct lcdd_transfer {
 #define WRITE_BITMAP	1
 
 int lcd_draw_bitmap(int fd, struct ipc_buffer *buf);
+int lcd_draw_text(int fd, struct ipc_buffer *buf);
+
 
 #endif /* SPIDEV_H */

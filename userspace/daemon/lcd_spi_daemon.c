@@ -1,4 +1,5 @@
 #include "lcd_spi.h"
+#include "fonts.h"
 
 static void pabort(const char *s)
 {
@@ -233,6 +234,43 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	}
 	lcd_draw(fd, tx, NULL, mem_size);
 	free(tx);
+	return 0;
+}
+
+int lcd_put_text(uint8_t *mem, struct ipc_buffer *buf)
+{
+	unsigned char *temp;
+	char sign;
+	for (uint16_t i = 0; i < buf->dx; i++) {
+		sign = buf->mem[i];
+		temp = &Font5x7[(sign - 32)*5];
+		for (uint8_t it = 0; it < 5; it++) {
+			if(*temp != 0) {
+				for (uint8_t itt = 0; itt < 8; itt++) {
+					if (*temp & (1 << itt)) {
+						*mem = 0xff;//robie bialo
+						mem += 1;
+						*mem = 0xff;//robie bialo
+						mem += 1;
+					}
+					mem += 240*2;//ide w dol
+				}
+				mem -= 8*240*2;//wracam do gory
+			}
+			mem += 2; //ide w prawo.
+			temp++;
+		}
+	}
+	return 0;
+}
+
+int lcd_draw_text(int fd, struct ipc_buffer *buf)
+{
+	uint8_t *mem = malloc(TOT_MEM_SIZE);
+	memset(mem, 0, TOT_MEM_SIZE);
+	lcd_set_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX);
+	lcd_put_text(mem, buf);
+	lcd_draw(fd, mem, NULL, TOT_MEM_SIZE);
 	return 0;
 }
 

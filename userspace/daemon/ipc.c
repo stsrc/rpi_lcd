@@ -38,12 +38,25 @@ static inline int ipc_accept(int socket, struct sockaddr_un *local,
 	return accept(socket, (struct sockaddr *)connected, &len);
 }
 
-static inline int ipc_write_text(int socket, struct sockaddr_un *connected, 
+static inline int ipc_write_text(int fd, int socket, 
+				 struct sockaddr_un *connected, 
 				 struct ipc_buffer *buf)
 {
-	int ret = recv(socket, buf->mem, TOT_MEM_SIZE, 0);
-	ret = 0;
-	return ret;
+	uint16_t temp[4];
+	int ret;
+	int cnt = sizeof(temp);
+	ret = recv(socket, temp, cnt, MSG_WAITALL);
+	if (ret != cnt)
+		return 1;
+	buf->x = temp[0];
+	buf->y = temp[1];
+	buf->dx = temp[3];
+	buf->dy = temp[4];
+	cnt = buf->dx;
+	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
+	if (ret != cnt)
+		return 1;
+	return lcd_draw_text(fd, buf);
 }
 
 static inline int ipc_draw_bitmap(int fd, int socket, 
@@ -77,7 +90,7 @@ static inline int ipc_action(int fd, int socket, struct sockaddr_un *connected,
 	}
 	switch(buf->cmd) {
 	case WRITE_TEXT:
-		return ipc_write_text(socket, connected, buf);
+		return ipc_write_text(fd, socket, connected, buf);
 	case WRITE_BITMAP:
 		return ipc_draw_bitmap(fd, socket, connected, buf);
 	}
