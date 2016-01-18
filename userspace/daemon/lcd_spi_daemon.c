@@ -162,8 +162,8 @@ static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 	transfer(fd, &tx[written], NULL, mem_size, SPI_IO_WR_DATA);
 }
 
-static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t height,
-			      uint16_t length)
+static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
+			      uint16_t height)
 {
 	uint8_t byte[4];
 	lcd_create_bytes(x, &byte[0], &byte[1]);
@@ -227,7 +227,7 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	memset(tx, 0, mem_size);
 	if (check_clean_mem(tx, NULL, 0))
 		pabort("No memory.");
-	lcd_set_rectangle(fd, x, y, height, length);
+	lcd_set_rectangle(fd, x, y, length, height);
 	if (lcd_fill_rect_with_colour(tx, mem_size, red, green, blue)) {
 		free(tx);
 		pabort("Wrong colours.");
@@ -245,13 +245,13 @@ int lcd_put_text(uint8_t *mem, struct ipc_buffer *buf)
 		sign = buf->mem[i];
 		temp = &Font5x7[(sign - 32)*5];
 		for (uint8_t it = 0; it < 5; it++) {
-			if(*temp != 0) {
-				for (uint8_t itt = 0; itt < 8; itt++) {
+			if(*temp) {
+				for (int8_t itt = 7; itt >= 0; itt--) {
 					if (*temp & (1 << itt)) {
 						*mem = 0xff;//robie bialo
-						mem += 1;
+						mem++;
 						*mem = 0xff;//robie bialo
-						mem += 1;
+						mem--;
 					}
 					mem += 240*2;//ide w dol
 				}
@@ -260,8 +260,22 @@ int lcd_put_text(uint8_t *mem, struct ipc_buffer *buf)
 			mem += 2; //ide w prawo.
 			temp++;
 		}
+		mem += 2;
 	}
 	return 0;
+}
+
+void lcd_test(uint8_t *mem)
+{
+	uint32_t cnt = 0;
+	while (cnt < TOT_MEM_SIZE) { 
+		*mem = 0xff;
+		mem++;
+		*mem = 0xff;
+		mem++;
+		mem += 239*2;
+		cnt += 240*2;
+	}
 }
 
 int lcd_draw_text(int fd, struct ipc_buffer *buf)
@@ -292,8 +306,8 @@ int lcd_draw_bitmap(int fd, struct ipc_buffer *buf)
 
 int lcd_clear_background(int fd) 
 {
-	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX, 15, 
-				  63, 0);
+	return lcd_draw_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX, 0, 
+				  0, 0);
 }
 
 int main(int argc, char *argv[])
@@ -304,7 +318,7 @@ int main(int argc, char *argv[])
 	if (fd < 0)
 		pabort("can't open device");
 	lcd_init(fd);
-	lcd_clear_background(fd);
+	//lcd_clear_background(fd);
 	ipc_main(fd);
 	close(fd);
 	return ret;

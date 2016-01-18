@@ -46,16 +46,20 @@ static inline int ipc_write_text(int fd, int socket,
 	int ret;
 	int cnt = sizeof(temp);
 	ret = recv(socket, temp, cnt, MSG_WAITALL);
-	if (ret != cnt)
+	if (ret != cnt) {
+		printf("recv 1\n");
 		return 1;
+	}
 	buf->x = temp[0];
 	buf->y = temp[1];
-	buf->dx = temp[3];
-	buf->dy = temp[4];
+	buf->dx = temp[2];
+	buf->dy = temp[3];
 	cnt = buf->dx;
 	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
-	if (ret != cnt)
+	if (ret != cnt) {
+		printf("recv 2\n");
 		return 1;
+	}
 	return lcd_draw_text(fd, buf);
 }
 

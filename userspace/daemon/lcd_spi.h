@@ -45,8 +45,8 @@ struct lcdd_transfer {
 #define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
 
-#define WRITE_TEXT	0
-#define WRITE_BITMAP	1
+#define WRITE_TEXT	1
+#define WRITE_BITMAP	2
 
 int lcd_draw_bitmap(int fd, struct ipc_buffer *buf);
 int lcd_draw_text(int fd, struct ipc_buffer *buf);
