@@ -185,8 +185,6 @@ static int lcdd_init_spi_data_transfer(struct lcdd_transfer *transfer,
 		return -EAGAIN;
 	}
 	spi_transfer->len = transfer->byte_cnt - 1;
-	//for (int i = 0; i < spi_transfer->len; i++)
-	//	printk(KERN_EMERG "0x%02x\n", ((uint8_t *)spi_transfer->tx_buf)[i]);
 	if (!spi_transfer->len)
 		return -EINVAL;
 	else
@@ -269,31 +267,23 @@ static int lcdd_write_cmd_data(struct file *file, unsigned long arg)
 	ret = lcdd_init_spi_cmd_transfer(&lcdd_transfer, &spi_transfer,
 					 (struct lcdd_transfer_bufs *)
 					 file->private_data);
-	if (ret) {
-		debug_message();
-		mutex_unlock(&lcdd.spi_lock);
-		return ret;
-	}
+	if (ret)
+		goto err;
 	ret = lcdd_message_send(&spi_transfer, 0);
-	if (ret) {
-		debug_message();
-		mutex_unlock(&lcdd.spi_lock);
-		return ret;
-	}
+	if (ret)
+		goto err;
 	ret = lcdd_init_spi_data_transfer(&lcdd_transfer, &spi_transfer);
-	if (ret) {
-		debug_message();
-		mutex_unlock(&lcdd.spi_lock);
-		return ret;
-	}
+	if (ret)
+		goto err;
 	ret = lcdd_message_send(&spi_transfer, 1);
-	if (ret) {
-		debug_message();
-		mutex_unlock(&lcdd.spi_lock);
-		return ret;
-	}
+	if (ret) 
+		goto err;
 	mutex_unlock(&lcdd.spi_lock);
 	return 1;
+err:
+	debug_message();
+	mutex_unlock(&lcdd.spi_lock);
+	return ret;
 }	
 
 static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -362,6 +352,7 @@ static int spidev_probe(struct spi_device *spi)
 	ret = lcdd_spi_device_set(spi);
 	if (ret)
 		debug_message();
+	//TODO
 	spi_set_drvdata(spi, &lcdd);
 	return 0;	
 }

@@ -6,6 +6,9 @@
  * Author: Pascal Stang 
  */
 
+#define FONT_X_LEN 5
+#define FONT_Y_LEN 8
+
 static unsigned char Font5x7[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00,// (space)
 	0x00, 0x00, 0x5F, 0x00, 0x00,// !

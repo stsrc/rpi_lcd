@@ -42,18 +42,13 @@ static inline int ipc_write_text(int fd, int socket,
 				 struct sockaddr_un *connected, 
 				 struct ipc_buffer *buf)
 {
-	uint16_t temp[4];
 	int ret;
-	int cnt = sizeof(temp);
-	ret = recv(socket, temp, cnt, MSG_WAITALL);
+	uint16_t cnt = 4 * sizeof(uint16_t);
+	ret = recv(socket, &buf->x, cnt, MSG_WAITALL);
 	if (ret != cnt) {
 		printf("recv 1\n");
 		return 1;
 	}
-	buf->x = temp[0];
-	buf->y = temp[1];
-	buf->dx = temp[2];
-	buf->dy = temp[3];
 	cnt = buf->dx;
 	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
 	if (ret != cnt) {
@@ -67,15 +62,10 @@ static inline int ipc_draw_bitmap(int fd, int socket,
 				  struct sockaddr_un *connected, 
 				  struct ipc_buffer *buf)
 {
-	uint16_t temp[4];
-	int cnt = sizeof(temp);
-	int ret = recv(socket, temp, cnt, MSG_WAITALL);
+	int cnt = 4 * sizeof(uint16_t);
+	int ret = recv(socket, &buf->x, cnt, MSG_WAITALL);
 	if (ret != cnt)
 		return 1;
-	buf->x = temp[0];
-	buf->y = temp[1];
-	buf->dx = temp[2];
-	buf->dy = temp[3];
 	cnt = BY_PER_PIX*buf->dx*buf->dy;
 	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
 	if (ret != cnt)

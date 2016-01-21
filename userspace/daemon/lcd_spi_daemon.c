@@ -237,45 +237,50 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	return 0;
 }
 
-int lcd_put_text(uint8_t *mem, struct ipc_buffer *buf)
+static inline void lcd_set_pos(uint8_t **mem, struct ipc_buffer *buf)
+{
+	*mem += buf->x * BY_PER_PIX * FONT_X_LEN;
+	*mem += LENGTH_MAX * (HEIGHT_MAX - 1) * BY_PER_PIX;
+	*mem -= buf->y * BY_PER_PIX * FONT_Y_LEN * LENGTH_MAX;
+}
+
+static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
 {
 	unsigned char *temp;
 	char sign;
+	uint8_t *temp_mem = (uint8_t *)mem;
+	lcd_set_pos(&temp_mem, buf);
 	for (uint16_t i = 0; i < buf->dx; i++) {
 		sign = buf->mem[i];
 		temp = &Font5x7[(sign - 32)*5];
 		for (uint8_t it = 0; it < 5; it++) {
-			if(*temp) {
-				for (int8_t itt = 7; itt >= 0; itt--) {
+			if (*temp) {
+				for (int8_t itt = 0; itt < 8; itt++) {
+					//if (*temp & (1 << itt)) {
 					if (*temp & (1 << itt)) {
-						*mem = 0xff;//robie bialo
-						mem++;
-						*mem = 0xff;//robie bialo
-						mem--;
+						*temp_mem = 0xff;//robie bialo
+						temp_mem++;
+						*temp_mem = 0xff;//robie bialo
+						temp_mem--;
 					}
-					mem += 240*2;//ide w dol
+					temp_mem -= LENGTH_MAX * BY_PER_PIX;
 				}
-				mem -= 8*240*2;//wracam do gory
+				temp_mem += 8 * LENGTH_MAX * BY_PER_PIX;
 			}
-			mem += 2; //ide w prawo.
+			temp_mem += BY_PER_PIX; //ide w prawo.
 			temp++;
 		}
-		mem += 2;
+		buf->x++;
+		if (buf->x >= LENGTH_MAX/5) {
+			temp_mem = (uint8_t *)mem;
+			buf->x = 0;
+			buf->y++;
+			if (buf->y >= HEIGHT_MAX/8)
+				buf->y = 0;
+			lcd_set_pos(&temp_mem, buf);
+		}
 	}
 	return 0;
-}
-
-void lcd_test(uint8_t *mem)
-{
-	uint32_t cnt = 0;
-	while (cnt < TOT_MEM_SIZE) { 
-		*mem = 0xff;
-		mem++;
-		*mem = 0xff;
-		mem++;
-		mem += 239*2;
-		cnt += 240*2;
-	}
 }
 
 int lcd_draw_text(int fd, struct ipc_buffer *buf)
