@@ -9,9 +9,8 @@ static void pabort(const char *s)
 
 static const char *device = "/dev/lcd_spi";
 
-static void transfer(int fd, uint8_t *tx, 
-		     uint8_t *rx, uint32_t n, unsigned int
-		     cmd)
+static void transfer(int fd, uint8_t *tx, uint8_t *rx, uint32_t n, 
+		     unsigned int cmd)
 {
 	int ret;
 	struct lcdd_transfer tr = {
@@ -68,6 +67,11 @@ static uint8_t check_clean_mem(void *tx, void *rx, int check_rx)
 	return 0;
 }
 
+static inline int transfer_wr_data(int fd, uint8_t *mem, uint32_t size) 
+{
+	transfer(fd, mem, NULL, size, SPI_IO_WR_DATA);
+	return 0;
+}
 static inline int transfer_wr_cmd(int fd, uint8_t cmd)
 {
 	transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
@@ -79,37 +83,29 @@ static int transfer_wr_cmd_data(int fd, int arg_cnt, ... )
 	va_list arg_list;
 	uint8_t cmd;
 	uint8_t *tx = NULL;
-	
+	if (arg_cnt < 1) 
+		return 1;	
 	va_start(arg_list, arg_cnt);
 	cmd = va_arg(arg_list, int);
-
+	transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
 	if (arg_cnt == 1) {
-		transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
 		va_end(arg_list);
 		return 0;
 	}
-
-	tx = malloc(sizeof(uint8_t)*(arg_cnt));
+	tx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
 	if (check_clean_mem(tx, NULL, 0))
 		pabort("No mem.");
-	tx[0] = cmd;
-	for (int i = 1; i < arg_cnt; i++) 
+	for (int i = 0; i < arg_cnt - 1; i++)
 		tx[i] = va_arg(arg_list, int);
-	
 	va_end(arg_list);
-	transfer(fd, tx, NULL, arg_cnt, SPI_IO_WR_CMD_DATA);
+	transfer(fd, tx, NULL, arg_cnt - 1, SPI_IO_WR_DATA);
 	free(tx);
 	return 0;
 }
 
 static int transfer_rd_d(int fd, int n, uint8_t cmd, uint8_t *rx)
 {
-	uint8_t *tx = malloc(n);
-	if (check_clean_mem(tx, rx, 1))
-		pabort("No mem.");
-	tx[0] = cmd;
-	transfer(fd, tx, rx, n, SPI_IO_RD_CMD);
-	free(tx);
+	transfer(fd, &cmd, rx, n, SPI_IO_RD_CMD);
 	return 0;
 }
 
@@ -126,7 +122,7 @@ static int lcd_set_LUT(int fd)
 	for (uint8_t i = 96; i < 128; i++) 
 		LUT[i] = 2 * (i - 96);
 	transfer_wr_cmd(fd, 0x2D);
-	transfer(fd, LUT, NULL, LUT_size, SPI_IO_WR_DATA);
+	transfer_wr_data(fd, LUT, LUT_size);
 	free(LUT);
 	return 0;
 }
@@ -173,13 +169,12 @@ static void lcd_draw(int fd, uint8_t *tx, uint8_t *rx, uint32_t mem_size)
 	uint32_t written = 0;
 	transfer_wr_cmd(fd, 0x2C);
 	while (mem_size >= single_wr_max) {
-		transfer(fd, &tx[written], NULL, single_wr_max, 
-			 SPI_IO_WR_DATA);
+		transfer_wr_data(fd, &tx[written], single_wr_max);
 		written += single_wr_max;
 		mem_size -= single_wr_max;
 	}
 	if (mem_size != 0)
-	transfer(fd, &tx[written], NULL, mem_size, SPI_IO_WR_DATA);
+	transfer_wr_data(fd, &tx[written], mem_size);
 }
 
 static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
@@ -187,10 +182,10 @@ static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 {
 	uint8_t byte[4];
 	lcd_create_bytes(x, &byte[0], &byte[1]);
-	lcd_create_bytes(x + length, &byte[2], &byte[3]);
+	lcd_create_bytes(x + length - 1, &byte[2], &byte[3]);
 	transfer_wr_cmd_data(fd, 5, 0x2A, byte[0], byte[1], byte[2], byte[3]);
 	lcd_create_bytes(y, &byte[0], &byte[1]);
-	lcd_create_bytes(y + height, &byte[2], &byte[3]);
+	lcd_create_bytes(y + height - 1, &byte[2], &byte[3]);
 	transfer_wr_cmd_data(fd, 5, 0x2B, byte[0], byte[1], byte[2], byte[3]);
 }
 
@@ -340,7 +335,6 @@ int lcd_draw_text(int fd, struct ipc_buffer *buf)
 	uint8_t *mem = malloc(TOT_MEM_SIZE);
 	lcd_set_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX);
 	transfer_rd_d(fd, TOT_MEM_SIZE, 0x2E, mem);
-	print_buf(mem, TOT_MEM_SIZE);
 	lcd_put_text(mem, buf);
 	lcd_draw(fd, mem, NULL, TOT_MEM_SIZE);
 	free(mem);
@@ -405,6 +399,8 @@ int main(int argc, char *argv[])
 	if (fd < 0)
 		pabort("can't open device");
 	lcd_init(fd);
+	lcd_clear_background(fd);
+	lcd_draw_rectangle(fd, 50, 50, 2, 2, 31, 63, 31);
 	ipc_main(fd);
 	close(fd);
 	return 0;
