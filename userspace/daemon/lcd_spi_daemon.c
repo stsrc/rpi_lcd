@@ -35,7 +35,7 @@ static void make_byte(char *byte, uint8_t value)
 	byte[8] = '\0';
 }
 
-static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint32_t n)
+void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint32_t n)
 {
 	char byte[9];
 	for (int i = 0; i < n; i++) {
@@ -48,6 +48,12 @@ static void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint32_t n)
 		make_byte(byte, rx[i]);
 		printf("Received byte: %s\n", byte);
 	}
+}
+
+void print_buf(uint8_t *buf, int size)
+{
+	for (int i = 0; i < size; i++) 
+		printf("%d: %x\n", i, buf[i]);
 }
 
 static uint8_t check_clean_mem(void *tx, void *rx, int check_rx) 
@@ -96,19 +102,32 @@ static int transfer_wr_cmd_data(int fd, int arg_cnt, ... )
 	return 0;
 }
 
-int transfer_rd_d(int fd, int n, uint8_t cmd)
+static int transfer_rd_d(int fd, int n, uint8_t cmd, uint8_t *rx)
 {
 	uint8_t *tx = malloc(n);
-	uint8_t *rx = malloc(n);
 	if (check_clean_mem(tx, rx, 1))
 		pabort("No mem.");
-	memset(tx, 0xFF, n);
-	memset(rx, 0, n);
 	tx[0] = cmd;
 	transfer(fd, tx, rx, n, SPI_IO_RD_CMD);
-	print_transfer(1, tx, rx, n);
 	free(tx);
-	free(rx);
+	return 0;
+}
+
+static int lcd_set_LUT(int fd)
+{
+	const uint8_t LUT_size = 128;
+	uint8_t *LUT = malloc(LUT_size);
+	if (LUT == NULL)
+		return 1;
+	for (uint8_t i = 0; i < 32; i++) 
+		LUT[i] = 2*i;
+	for (uint8_t i = 32; i < 96; i++) 
+		LUT[i] = i - 32;
+	for (uint8_t i = 96; i < 128; i++) 
+		LUT[i] = 2 * (i - 96);
+	transfer_wr_cmd(fd, 0x2D);
+	transfer(fd, LUT, NULL, LUT_size, SPI_IO_WR_DATA);
+	free(LUT);
 	return 0;
 }
 
@@ -118,13 +137,13 @@ static void lcd_init(int fd)
 	/*Reset*/
 	transfer_wr_cmd(fd, 0x01);
 	req.tv_sec = 0;
-	req.tv_nsec = 120000000; //120ms.	
+	req.tv_nsec = 120000000; 
 	nanosleep(&req, NULL);
 	/*Display ON*/
 	transfer_wr_cmd(fd, 0x29);
 	/*Display sleep out*/
 	transfer_wr_cmd(fd, 0x11);
-	req.tv_nsec = 5000000; //5ms
+	req.tv_nsec = 5000000; 
 	nanosleep(&req, NULL);
 	/*Pixel format set - 16bits/pixel*/
 	transfer_wr_cmd_data(fd, 2, 0x3A, 0x55);
@@ -134,10 +153,11 @@ static void lcd_init(int fd)
 	nanosleep(&req, NULL);
 	/*Brightness control block on*/
 	transfer_wr_cmd_data(fd, 2, 0x53, 0x2C);
-	nanosleep(&req, NULL); //120ms
+	nanosleep(&req, NULL); 
 	/*Display brightness - 0xff*/
 	transfer_wr_cmd_data(fd, 2, 0x51, 0x12);
-	nanosleep(&req, NULL); //120ms
+	nanosleep(&req, NULL);
+	lcd_set_LUT(fd);	
 }
 
 static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *younger)
@@ -177,7 +197,7 @@ static void lcd_set_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 static int lcd_colour_test(const uint8_t red, const uint8_t green, const 
 			   uint8_t blue)
 {
-	const uint8_t rb_max = 31;
+	const uint8_t rb_max = 31;//BAD STYLE - MAGIC
 	const uint8_t g_max = 63;
 
 	if ((red > rb_max) || (blue > rb_max))
@@ -224,7 +244,6 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 		pabort("Wrong parameters");
 	mem_size = BY_PER_PIX * height * length;
 	tx = malloc(mem_size);
-	memset(tx, 0, mem_size);
 	if (check_clean_mem(tx, NULL, 0))
 		pabort("No memory.");
 	lcd_set_rectangle(fd, x, y, length, height);
@@ -244,6 +263,36 @@ static inline void lcd_set_pos(uint8_t **mem, struct ipc_buffer *buf)
 	*mem -= buf->y * BY_PER_PIX * FONT_Y_LEN * LENGTH_MAX;
 }
 
+static void lcd_colorize_text(uint8_t *mem, enum colors color)
+{
+	switch(color) {
+	case black:
+		lcd_colour_prepare(0, 0, 0, mem);
+		return;
+	case white:
+		lcd_colour_prepare(31, 63, 31, mem);
+		return;
+	case red:
+	       lcd_colour_prepare(31, 0, 0, mem);
+		return;
+	case blue:
+		lcd_colour_prepare(0, 0, 31, mem);
+		return;
+	case yellow:
+		lcd_colour_prepare(31, 63, 0, mem);
+		return;
+	case green:
+		lcd_colour_prepare(0, 63, 0, mem);
+		return;
+	case brown:
+		lcd_colour_prepare(31, 16, 16, mem);
+		return;
+	default:
+		return;
+	}		
+	return;	
+}
+
 static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
 {
 	unsigned char *temp;
@@ -255,19 +304,22 @@ static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
 		temp = &Font5x7[(sign - 32)*5];
 		for (uint8_t it = 0; it < 5; it++) {
 			if (*temp) {
-				for (int8_t itt = 0; itt < 8; itt++) {
-					//if (*temp & (1 << itt)) {
+				for (uint8_t itt = 0; itt < 8; itt++) {
 					if (*temp & (1 << itt)) {
-						*temp_mem = 0xff;//robie bialo
-						temp_mem++;
-						*temp_mem = 0xff;//robie bialo
-						temp_mem--;
+						lcd_colorize_text(temp_mem, buf->dy >> 8);
+					} else {
+						lcd_colorize_text(temp_mem, buf->dy & 0xff);
 					}
 					temp_mem -= LENGTH_MAX * BY_PER_PIX;
 				}
-				temp_mem += 8 * LENGTH_MAX * BY_PER_PIX;
+			} else {
+				for (uint8_t itt = 0; itt < 8; itt++) {
+					lcd_colorize_text(temp_mem, buf->dy & 0xff);
+					temp_mem -= LENGTH_MAX * BY_PER_PIX;
+				}
 			}
-			temp_mem += BY_PER_PIX; //ide w prawo.
+			temp_mem += 8 * LENGTH_MAX * BY_PER_PIX;
+			temp_mem += BY_PER_PIX;
 			temp++;
 		}
 		buf->x++;
@@ -286,10 +338,12 @@ static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
 int lcd_draw_text(int fd, struct ipc_buffer *buf)
 {
 	uint8_t *mem = malloc(TOT_MEM_SIZE);
-	memset(mem, 0, TOT_MEM_SIZE);
 	lcd_set_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX);
+	transfer_rd_d(fd, TOT_MEM_SIZE, 0x2E, mem);
+	print_buf(mem, TOT_MEM_SIZE);
 	lcd_put_text(mem, buf);
 	lcd_draw(fd, mem, NULL, TOT_MEM_SIZE);
+	free(mem);
 	return 0;
 }
 
@@ -315,16 +369,43 @@ int lcd_clear_background(int fd)
 				  0, 0);
 }
 
+int switch_to_daemon()
+{
+	pid_t pid;
+	pid = fork();
+	if (pid < 0)
+		exit(1);
+	switch (pid) {
+	case 0:
+		break;
+	default:
+		exit(0);
+	}
+	umask(0);	//do not understand
+	pid = setsid();
+	if (pid < 0) 
+		exit(1);
+	if ((chdir("/")) < 0)
+		exit(1);
+	close(0);
+	close(1);
+	close(2);
+	signal(SIGCHLD, SIG_IGN);
+	signal(SIGTSTP, SIG_IGN);
+	signal(SIGTTOU, SIG_IGN);
+	signal(SIGTTIN, SIG_IGN);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
-	int ret = 0;
 	int fd;
+	//switch_to_daemon();
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		pabort("can't open device");
 	lcd_init(fd);
-	//lcd_clear_background(fd);
 	ipc_main(fd);
 	close(fd);
-	return ret;
+	return 0;
 }

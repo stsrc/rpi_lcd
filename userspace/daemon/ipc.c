@@ -79,7 +79,6 @@ static inline int ipc_action(int fd, int socket, struct sockaddr_un *connected,
 	int ret;
 	ret = recv(socket, &(buf->cmd), sizeof(buf->cmd), MSG_WAITALL);
 	if (ret != sizeof(buf->cmd)) {
-		printf("Bug\n");
 		return 1;
 	}
 	switch(buf->cmd) {
@@ -104,25 +103,17 @@ int ipc_main(int fd)
 	ret = ipc_make(&server_socket, &server);
 	if (ret) {
 		perror("ipc_make");
-		goto err;
+		return 1;
 	}
 	while(1) {
 		client_socket = ipc_accept(server_socket, &server, &client);
-		if (client_socket < 0) {
+		if (client_socket < 0) 
 			perror("ipc_accept");
-			goto err;
-		}
 		ret = ipc_action(fd, client_socket, &client, &buf);
-		if (ret) {
+		if (ret)
 			perror("ipc_action");
-			goto err;
-		}
 		close(client_socket);
 	}
 	close(server_socket);
 	return 0;
-err:
-	close(client_socket);
-	close(server_socket);
-	return ret;
 }

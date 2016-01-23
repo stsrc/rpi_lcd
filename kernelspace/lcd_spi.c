@@ -17,6 +17,8 @@
 #define LENGTH 240
 #define BY_PER_PIX 2
 
+#define SPI_SPEED 1953000
+
 #ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d\n", __FUNCTION__, \
 			       __LINE__)
@@ -91,7 +93,6 @@ static struct gpio lcd_gpio[] = {
 	{ 25, GPIOF_OUT_INIT_HIGH, "RESET" },
 	{ 18, GPIOF_OUT_INIT_HIGH, "LED" }
 };
-
 
 static inline int lcdd_set_gpio(void)
 {
@@ -206,6 +207,7 @@ static int lcdd_message_send(struct spi_transfer *spi_transfer, uint8_t data_cmd
 	spi_message.complete = lcdd_complete_transfer;
 	spi_message.context = &done;
 	lcdd_set_data_cmd_pin(data_cmd);
+	udelay(1);
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
@@ -242,8 +244,12 @@ static int lcdd_write(struct file *file, unsigned long arg, uint8_t data_cmd)
 		return ret;
 	}
 	if ((data_cmd == 0) && lcdd_transfer.rx) {
-		ret = copy_to_user(lcdd_transfer.rx, (void *)spi_transfer.rx_buf,
-			           spi_transfer.len);
+		/*
+		 * addition and subtraction to remove not important data
+		 * (answer for command write and dummy byte removed)
+		 */
+		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf + 2),
+			           spi_transfer.len - 2);
 		if (ret) {
 			mutex_unlock(&lcdd.spi_lock);
 			return -EINVAL;
@@ -325,7 +331,7 @@ MODULE_DEVICE_TABLE(of, lcd_spi_dt_ids);
 
 static int lcdd_spi_device_set(struct spi_device *spi)
 {
-	spi->max_speed_hz = 32000000;
+	spi->max_speed_hz = SPI_SPEED;
 	spi->bits_per_word = 8;
 	spi->mode = 0;
 	return spi_setup(spi);	
@@ -352,7 +358,6 @@ static int spidev_probe(struct spi_device *spi)
 	ret = lcdd_spi_device_set(spi);
 	if (ret)
 		debug_message();
-	//TODO
 	spi_set_drvdata(spi, &lcdd);
 	return 0;	
 }

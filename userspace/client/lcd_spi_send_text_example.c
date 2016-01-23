@@ -2,7 +2,7 @@
 
 static int ipc_make_message(struct ipc_buffer *buf)
 {
-	char *text = "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890\0";
+	char *text = "2\0";
 	memset(buf, 0, sizeof(struct ipc_buffer));
 	buf->cmd = WRITE_TEXT;
 	buf->mem = malloc(TOT_MEM_SIZE);
@@ -10,10 +10,10 @@ static int ipc_make_message(struct ipc_buffer *buf)
 		return 1;
 	memset(buf->mem, 0, TOT_MEM_SIZE);
 	strcpy((char *)buf->mem, text);
-	buf->x = 20;
-	buf->y = 38;
+	buf->x = 0;
+	buf->y = 0;
 	buf->dx = strlen(text);
-	buf->dy = HEIGHT_MAX;
+	buf->dy = (brown << 8) | white;
 	return 0;
 }
 

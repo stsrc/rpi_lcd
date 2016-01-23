@@ -10,4 +10,5 @@ lcd_spi_daemon
 *cmd
 spidev_test
 *.swp
+*example
 fonts/*
