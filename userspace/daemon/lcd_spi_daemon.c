@@ -105,7 +105,7 @@ static int transfer_wr_cmd_data(int fd, int arg_cnt, ... )
 
 static int transfer_rd_d(int fd, int n, uint8_t cmd, uint8_t *rx)
 {
-	transfer(fd, &cmd, rx, n, SPI_IO_RD_CMD);
+	transfer(fd, &cmd, rx, n + 2, SPI_IO_RD_CMD);
 	return 0;
 }
 
@@ -203,8 +203,8 @@ static int lcd_colour_test(const uint8_t red, const uint8_t green, const
 		return 0;
 }
 
-static inline void lcd_colour_prepare(const uint8_t red, const uint8_t green, 
-				      const uint8_t blue, uint8_t *tx)
+static inline void lcd_color_prepare(const uint8_t red, const uint8_t green, 
+				     const uint8_t blue, uint8_t *tx)
 {
 	uint8_t first = 0;
 	uint8_t second = 0;
@@ -223,7 +223,7 @@ static int lcd_fill_rect_with_colour(uint8_t *tx, const uint32_t mem_size,
 	if (lcd_colour_test(red, green, blue))
 		return 1;
 	for (uint32_t i = 0; i < mem_size; i += BY_PER_PIX) 
-		lcd_colour_prepare(red, green, blue, &tx[i]);
+		lcd_color_prepare(red, green, blue, &tx[i]);
 	return 0;
 }
 
@@ -262,25 +262,27 @@ static void lcd_colorize_text(uint8_t *mem, enum colors color)
 {
 	switch(color) {
 	case black:
-		lcd_colour_prepare(0, 0, 0, mem);
+		lcd_color_prepare(0, 0, 0, mem);
 		return;
 	case white:
-		lcd_colour_prepare(31, 63, 31, mem);
+		lcd_color_prepare(31, 63, 31, mem);
 		return;
 	case red:
-	       lcd_colour_prepare(31, 0, 0, mem);
+	       lcd_color_prepare(31, 0, 0, mem);
 		return;
 	case blue:
-		lcd_colour_prepare(0, 0, 31, mem);
+		lcd_color_prepare(0, 0, 31, mem);
 		return;
 	case yellow:
-		lcd_colour_prepare(31, 63, 0, mem);
+		lcd_color_prepare(31, 63, 0, mem);
 		return;
 	case green:
-		lcd_colour_prepare(0, 63, 0, mem);
+		lcd_color_prepare(0, 63, 0, mem);
 		return;
 	case brown:
-		lcd_colour_prepare(31, 16, 16, mem);
+		lcd_color_prepare(31, 16, 16, mem);
+		return;
+	case background:
 		return;
 	default:
 		return;
@@ -330,14 +332,33 @@ static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
 	return 0;
 }
 
+void lcd_converse_colors(uint8_t *mem, uint8_t *mem_out, uint32_t size)
+{
+	uint8_t red, green, blue;
+	uint32_t i_out = 0;
+	for (uint32_t i = 0; i < size; i += 3) {
+		red = mem[i] >> 3;
+		green = mem[i + 1] >> 2;
+		blue = mem[i + 2] >> 3;
+		printf("%d, %d, %d\n", red, green, blue);
+		lcd_color_prepare(red, green, blue, &mem_out[i_out]);	
+		i_out += 2;
+	}
+}
+
 int lcd_draw_text(int fd, struct ipc_buffer *buf)
 {
-	uint8_t *mem = malloc(TOT_MEM_SIZE);
-	lcd_set_rectangle(fd, 0, 0, LENGTH_MAX, HEIGHT_MAX);
-	transfer_rd_d(fd, TOT_MEM_SIZE, 0x2E, mem);
-	lcd_put_text(mem, buf);
-	lcd_draw(fd, mem, NULL, TOT_MEM_SIZE);
+	uint8_t *mem, *mem_out;
+	mem = malloc(HEIGHT_MAX * LENGTH_MAX * 3);
+	mem_out = malloc(TOT_MEM_SIZE);
+	if ((!mem) || (!mem_out))
+		return 1;
+	transfer_rd_d(fd, HEIGHT_MAX * LENGTH_MAX * 3, 0x2E, mem);
+	lcd_converse_colors(mem, mem_out, HEIGHT_MAX * LENGTH_MAX * 3);
+	lcd_put_text(mem_out, buf);
+	lcd_draw(fd, mem_out, NULL, TOT_MEM_SIZE);
 	free(mem);
+	free(mem_out);
 	return 0;
 }
 
@@ -400,7 +421,6 @@ int main(int argc, char *argv[])
 		pabort("can't open device");
 	lcd_init(fd);
 	lcd_clear_background(fd);
-	lcd_draw_rectangle(fd, 50, 50, 2, 2, 31, 63, 31);
 	ipc_main(fd);
 	close(fd);
 	return 0;

@@ -13,7 +13,7 @@ static int ipc_make_message(struct ipc_buffer *buf)
 	buf->x = 40;
 	buf->y = 20;
 	buf->dx = strlen(text);
-	buf->dy = (brown << 8) | white;
+	buf->dy = (background << 8) | white;
 	return 0;
 }
 

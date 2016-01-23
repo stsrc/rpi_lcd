@@ -43,7 +43,7 @@
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 
 enum colors {
-	black, white, red, blue, yellow, green, brown 
+	black, white, red, blue, yellow, green, brown, background 
 };
 
 struct lcdd_transfer {

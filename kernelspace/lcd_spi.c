@@ -54,13 +54,13 @@ int lcdd_open(struct inode *inode, struct file *file)
 					lcdd_transfer_bufs), GFP_KERNEL);
 	if (!bufs)
 		return -ENOMEM;
-	bufs->tx = kmalloc(TOT_MEM_SIZE, GFP_KERNEL);
+	bufs->tx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
 	if (!bufs->tx) {
 		kfree(bufs);
 		bufs = NULL;
 		return -ENOMEM;
 	}
-	bufs->rx = kmalloc(TOT_MEM_SIZE, GFP_KERNEL);
+	bufs->rx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
 	if (!bufs->rx) {
 		kfree(bufs->tx);
 		kfree(bufs);
@@ -228,8 +228,8 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 		 * addition and subtraction to remove not important data
 		 * (answer for command write and dummy byte removed)
 		 */
-		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf),
-			           spi_transfer.len);
+		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf + 2),
+			           spi_transfer.len - 2);
 		if (ret) {
 			goto err;
 		}	
