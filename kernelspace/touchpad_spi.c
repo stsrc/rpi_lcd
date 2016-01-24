@@ -11,6 +11,10 @@
 #include <linux/delay.h>
 #include <linux/uaccess.h>
 #include <linux/mutex.h>
+#include <linux/interrupt.h>
+#include <linux/export.h>
+
+#include "touchpad_notifier.h"
 
 #define DRIVER_NAME "touchpad_spi"
 #define SPI_SPEED 9600
@@ -34,6 +38,7 @@ struct lcdd {
 	struct spi_device *spi_device;
 	uint8_t *tx;
 	uint8_t *rx;
+	uint32_t irq;
 };
 
 static struct lcdd lcdd;
@@ -47,6 +52,22 @@ struct lcdd_transfer {
 static struct gpio lcd_gpio[] = {
 	{ 23, GPIOF_IN, "IRQ" }
 };
+
+static ATOMIC_NOTIFIER_HEAD(touchpad_notifier_list);
+
+int register_touchpad_notifier(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_register(&touchpad_notifier_list, nb);
+}
+
+EXPORT_SYMBOL_GPL(register_touchpad_notifier);
+
+int unregister_touchpad_notifier(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_unregister(&touchpad_notifier_list, nb);
+}
+
+EXPORT_SYMBOL_GPL(unregister_touchpad_notifier);
 
 int lcdd_open(struct inode *inode, struct file *file)
 {
@@ -75,6 +96,7 @@ static inline int lcdd_set_gpio(void)
 {
 	int ret;
 	ret = gpio_request_array(lcd_gpio, ARRAY_SIZE(lcd_gpio));
+	lcdd.irq = gpio_to_irq(lcd_gpio[0].gpio);
 	return ret;	
 }
 
@@ -246,6 +268,14 @@ static struct spi_driver lcd_spi_driver = {
 	.remove = lcdd_remove,
 };
 
+static irq_handler_t touchpad_interrupt(unsigned int irq, void *dev_id,
+					struct pt_regs *regs)
+{
+	int rt;
+	rt = atomic_notifier_call_chain(&touchpad_notifier_list, 0, NULL);
+	return (irq_handler_t) IRQ_HANDLED;
+}
+
 static int __init lcdd_init(void)
 {
 	int rt;
@@ -274,6 +304,14 @@ static int __init lcdd_init(void)
 		goto err;
 	}
 	lcdd_set_gpio();
+	rt = request_irq(lcdd.irq, (irq_handler_t)touchpad_interrupt, 
+			 IRQF_TRIGGER_FALLING, "touchpad_interrupt",
+			 NULL);
+	printk(KERN_EMERG "touchpad_spi: request_irq result: %d\n", rt);
+	if (rt) {
+		cdev_del(lcdd.cdev);
+		goto err;
+	}
 	return 0;
 err:
 	if (lcdd.class)
@@ -284,6 +322,7 @@ err:
 
 static void __exit lcdd_exit(void)
 {
+	free_irq(lcdd.irq, NULL);
 	lcdd_unset_gpio();
 	spi_unregister_driver(&lcd_spi_driver);
 	device_destroy(lcdd.class, lcdd.devt);

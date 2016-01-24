@@ -12,6 +12,11 @@
 #include <linux/uaccess.h>
 #include <linux/mutex.h>
 
+#include <linux/timer.h>
+#include <asm-generic/param.h>
+
+#include "touchpad_notifier.h"
+
 #define DRIVER_NAME "lcd_spi"
 #define HEIGHT 320
 #define LENGTH 240
@@ -55,6 +60,26 @@ static struct gpio lcd_gpio[] = {
 	{ 24, GPIOF_OUT_INIT_LOW, "DC" },
 	{ 25, GPIOF_OUT_INIT_HIGH, "RESET" },
 	{ 18, GPIOF_OUT_INIT_HIGH, "LED" }
+};
+
+
+void lcdd_backlight_timer_handler(unsigned long arg)
+{
+	gpio_set_value(lcd_gpio[2].gpio, 0);
+}
+
+DEFINE_TIMER(lcdd_backlight_timer, lcdd_backlight_timer_handler, 5 * HZ, 0);
+
+
+static int lcdd_notf_pressed(struct notifier_block *nblock, unsigned long code,
+			     void *_param)
+{
+	gpio_set_value(lcd_gpio[2].gpio, 1);
+	return 0;
+}
+
+static struct notifier_block lcdd_pressed = {
+	.notifier_call = lcdd_notf_pressed
 };
 
 int lcdd_open(struct inode *inode, struct file *file)
@@ -323,6 +348,7 @@ static int __init lcdd_init(void)
 	}
 	lcdd_set_gpio();
 	lcdd_reset();
+	register_touchpad_notifier(&lcdd_pressed);
 	return 0;
 err:
 	if (lcdd.class)
@@ -333,6 +359,7 @@ err:
 
 static void __exit lcdd_exit(void)
 {
+	unregister_touchpad_notifier(&lcdd_pressed);
 	lcdd_unset_gpio();
 	spi_unregister_driver(&lcd_spi_driver);
 	device_destroy(lcdd.class, lcdd.devt);
