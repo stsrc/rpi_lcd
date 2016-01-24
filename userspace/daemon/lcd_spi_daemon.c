@@ -72,6 +72,7 @@ static inline int transfer_wr_data(int fd, uint8_t *mem, uint32_t size)
 	transfer(fd, mem, NULL, size, SPI_IO_WR_DATA);
 	return 0;
 }
+
 static inline int transfer_wr_cmd(int fd, uint8_t cmd)
 {
 	transfer(fd, &cmd, NULL, 1, SPI_IO_WR_CMD);
@@ -251,11 +252,18 @@ static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	return 0;
 }
 
-static inline void lcd_set_pos(uint8_t **mem, struct ipc_buffer *buf)
+static inline void lcd_set_pos(uint8_t **mem, struct ipc_buffer *buf, 
+			       uint8_t line_cnt, uint8_t mode)
 {
-	*mem += buf->x * BY_PER_PIX * FONT_X_LEN;
-	*mem += LENGTH_MAX * (HEIGHT_MAX - 1) * BY_PER_PIX;
-	*mem -= buf->y * BY_PER_PIX * FONT_Y_LEN * LENGTH_MAX;
+	if (!mode) {
+		*mem += buf->x * BY_PER_PIX * FONT_X_LEN;
+		if (line_cnt)
+			*mem += FONT_Y_LEN * BY_PER_PIX * LENGTH_MAX * (line_cnt - 1);
+		*mem += (FONT_Y_LEN - 1) * BY_PER_PIX * LENGTH_MAX;
+	} else {
+		*mem += buf->x * BY_PER_PIX * FONT_X_LEN;
+		*mem += (HEIGHT_MAX - 1 - buf->y * FONT_Y_LEN) * BY_PER_PIX * LENGTH_MAX;
+	}
 }
 
 static void lcd_colorize_text(uint8_t *mem, enum colors color)
@@ -290,12 +298,13 @@ static void lcd_colorize_text(uint8_t *mem, enum colors color)
 	return;	
 }
 
-static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
+static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf, 
+			uint8_t line_cnt, const uint8_t mode)
 {
 	unsigned char *temp;
 	char sign;
 	uint8_t *temp_mem = (uint8_t *)mem;
-	lcd_set_pos(&temp_mem, buf);
+	lcd_set_pos(&temp_mem, buf, line_cnt, mode);
 	for (uint16_t i = 0; i < buf->dx; i++) {
 		sign = buf->mem[i];
 		temp = &Font5x7[(sign - 32)*5];
@@ -315,18 +324,19 @@ static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf)
 					temp_mem -= LENGTH_MAX * BY_PER_PIX;
 				}
 			}
-			temp_mem += 8 * LENGTH_MAX * BY_PER_PIX;
+			temp_mem += FONT_Y_LEN * LENGTH_MAX * BY_PER_PIX;
 			temp_mem += BY_PER_PIX;
 			temp++;
 		}
 		buf->x++;
-		if (buf->x >= LENGTH_MAX/5) {
+		if (buf->x >= LENGTH_MAX / FONT_X_LEN) {
 			temp_mem = (uint8_t *)mem;
 			buf->x = 0;
 			buf->y++;
-			if (buf->y >= HEIGHT_MAX/8)
+			if (buf->y == HEIGHT_MAX / FONT_Y_LEN)
 				buf->y = 0;
-			lcd_set_pos(&temp_mem, buf);
+			line_cnt--;
+			lcd_set_pos(&temp_mem, buf, line_cnt, mode);
 		}
 	}
 	return 0;
@@ -340,23 +350,69 @@ void lcd_converse_colors(uint8_t *mem, uint8_t *mem_out, uint32_t size)
 		red = mem[i] >> 3;
 		green = mem[i + 1] >> 2;
 		blue = mem[i + 2] >> 3;
-		printf("%d, %d, %d\n", red, green, blue);
 		lcd_color_prepare(red, green, blue, &mem_out[i_out]);	
 		i_out += 2;
 	}
 }
 
+static inline int lcd_check_input(struct ipc_buffer *buf)
+{
+	if (buf->x >= LENGTH_MAX / FONT_X_LEN)
+		return 1;
+	else if (buf->y >= HEIGHT_MAX / FONT_Y_LEN)
+		return 1;
+	return 0;
+}
+
+static uint32_t lcd_set_text_area(int fd, struct ipc_buffer *buf, 
+				  uint8_t *line_cnt, uint8_t *mode)
+{
+	uint16_t x = 0, y = 0, dx = 0, dy = 0;
+	uint32_t pix_cnt;
+	*mode = 0;
+	if (buf->x + buf->dx > LENGTH_MAX / FONT_X_LEN) {
+		x = 0;
+		*line_cnt = (buf->x + buf->dx) / (LENGTH_MAX / FONT_X_LEN) + 1;
+		if (buf->y + *line_cnt > HEIGHT_MAX / FONT_Y_LEN) {
+			x = 0;
+			y = 0;
+			dx = LENGTH_MAX;
+			dy = HEIGHT_MAX;
+			pix_cnt = dx * dy;
+			*mode = 1;
+		} else {
+			dx = LENGTH_MAX;
+			dy = FONT_Y_LEN * *line_cnt;
+			y = (HEIGHT_MAX - 1) - FONT_Y_LEN * buf->y;
+			pix_cnt = dy * LENGTH_MAX;
+		}
+	} else {
+		x = 0;	
+		y = (HEIGHT_MAX - 1) - FONT_Y_LEN * buf->y;
+		dx = LENGTH_MAX;
+		dy = FONT_Y_LEN;
+		pix_cnt = dx * dy; 
+		*line_cnt = 1;
+	}
+	lcd_set_rectangle(fd, x, y, dx, dy);
+	return pix_cnt;
+}
+
 int lcd_draw_text(int fd, struct ipc_buffer *buf)
 {
-	uint8_t *mem, *mem_out;
-	mem = malloc(HEIGHT_MAX * LENGTH_MAX * 3);
-	mem_out = malloc(TOT_MEM_SIZE);
+	uint8_t *mem, *mem_out, line_cnt, mode;
+	uint32_t pix_cnt;
+	if (lcd_check_input(buf)) 
+		return 1;
+	pix_cnt = lcd_set_text_area(fd, buf, &line_cnt, &mode);
+	mem = malloc(pix_cnt * 3);
+	mem_out = malloc(pix_cnt * 2);
 	if ((!mem) || (!mem_out))
 		return 1;
-	transfer_rd_d(fd, HEIGHT_MAX * LENGTH_MAX * 3, 0x2E, mem);
-	lcd_converse_colors(mem, mem_out, HEIGHT_MAX * LENGTH_MAX * 3);
-	lcd_put_text(mem_out, buf);
-	lcd_draw(fd, mem_out, NULL, TOT_MEM_SIZE);
+	transfer_rd_d(fd, pix_cnt * 3, 0x2E, mem);
+	lcd_converse_colors(mem, mem_out, pix_cnt * 3);
+	lcd_put_text(mem_out, buf, line_cnt, mode);
+	lcd_draw(fd, mem_out, NULL, pix_cnt * 2);
 	free(mem);
 	free(mem_out);
 	return 0;
@@ -384,7 +440,7 @@ int lcd_clear_background(int fd)
 				  0, 0);
 }
 
-int switch_to_daemon()
+int switch_to_daemon(int fd)
 {
 	pid_t pid;
 	pid = fork();
@@ -394,9 +450,10 @@ int switch_to_daemon()
 	case 0:
 		break;
 	default:
+		close(fd);
 		exit(0);
 	}
-	umask(0);	//do not understand
+	umask(0);
 	pid = setsid();
 	if (pid < 0) 
 		exit(1);
@@ -415,10 +472,10 @@ int switch_to_daemon()
 int main(int argc, char *argv[])
 {
 	int fd;
-	//switch_to_daemon();
 	fd = open(device, O_RDWR);
 	if (fd < 0)
 		pabort("can't open device");
+	//switch_to_daemon(fd);
 	lcd_init(fd);
 	lcd_clear_background(fd);
 	ipc_main(fd);

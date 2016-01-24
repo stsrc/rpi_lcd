@@ -2,7 +2,7 @@
 
 static int ipc_make_message(struct ipc_buffer *buf)
 {
-	char *text = "aAbBcCdDe\0";
+	char *text = "AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpRrSsTtUuVvWwXxYyZz1!2@3#4$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\0";
 	memset(buf, 0, sizeof(struct ipc_buffer));
 	buf->cmd = WRITE_TEXT;
 	buf->mem = malloc(TOT_MEM_SIZE);
@@ -10,10 +10,10 @@ static int ipc_make_message(struct ipc_buffer *buf)
 		return 1;
 	memset(buf->mem, 0, TOT_MEM_SIZE);
 	strcpy((char *)buf->mem, text);
-	buf->x = 40;
-	buf->y = 20;
+	buf->x = 24;
+	buf->y = 38;
 	buf->dx = strlen(text);
-	buf->dy = (background << 8) | white;
+	buf->dy = (red << 8) | white;
 	return 0;
 }
 
