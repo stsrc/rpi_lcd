@@ -13,11 +13,7 @@
 #include <linux/mutex.h>
 
 #define DRIVER_NAME "touchpad_spi"
-#define HEIGHT 320
-#define LENGTH 240
-#define BY_PER_PIX 2
-#define TOT_MEM_SIZE BY_PER_PIX*HEIGHT*LENGTH
-#define SPI_SPEED 6600000
+#define SPI_SPEED 9600
 
 #ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d\n", __FUNCTION__, \
@@ -27,9 +23,7 @@
 #endif
 
 #define SPI_IOC_MAGIC 'k'
-#define SPI_IO_WR_DATA		_IOW(SPI_IOC_MAGIC, 6, struct lcdd_transfer)
-#define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
-#define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+#define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
 
 struct lcdd {
 	struct cdev *cdev;
@@ -45,7 +39,6 @@ struct lcdd {
 static struct lcdd lcdd;
 
 struct lcdd_transfer {
-	uint32_t byte_cnt;
 	const uint8_t __user *tx;
 	uint8_t __user *rx;
 };
@@ -57,10 +50,10 @@ static struct gpio lcd_gpio[] = {
 
 int lcdd_open(struct inode *inode, struct file *file)
 {
-	lcdd.tx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
+	lcdd.tx = kzalloc(3, GFP_KERNEL);
 	if (!lcdd.tx)
 		return -ENOMEM;
-	lcdd.rx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
+	lcdd.rx = kzalloc(3, GFP_KERNEL);
 	if (!lcdd.rx) {
 		kfree(lcdd.tx);
 		return -ENOMEM;
@@ -90,14 +83,6 @@ static inline void lcdd_unset_gpio(void)
 	gpio_free_array(lcd_gpio, ARRAY_SIZE(lcd_gpio));
 }
 
-static inline void lcdd_reset(void) 
-{
-}
-
-static inline void lcdd_set_data_cmd_pin(uint8_t data_cmd)
-{
-}
-
 static int lcdd_parse_user_data(const char __user *message, 
 			        struct lcdd_transfer *transfer)
 {
@@ -105,10 +90,6 @@ static int lcdd_parse_user_data(const char __user *message,
 			     sizeof(struct lcdd_transfer));
 	if (ret)
 		return -EAGAIN;
-	if (!transfer->byte_cnt) {
-		debug_message();
-		return -EINVAL;
-	}
 	else if (transfer->tx == NULL) {
 		debug_message();
 		return -EINVAL;
@@ -122,22 +103,10 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 	int ret;
 	memset(spi_transfer, 0, sizeof(struct spi_transfer));
 	switch (op) {
-	case SPI_IO_WR_DATA:
-	case SPI_IO_WR_CMD:
-		spi_transfer->tx_buf = lcdd.tx;
-		spi_transfer->len = transfer->byte_cnt;
-		memset(lcdd.tx, 0, TOT_MEM_SIZE);
-		ret = copy_from_user(lcdd.tx, transfer->tx, transfer->byte_cnt);
-		if (ret) {
-			spi_transfer->tx_buf = NULL;
-			return -EAGAIN;
-		}
-		return 0;
 	case SPI_IO_RD_CMD:
 		spi_transfer->tx_buf = lcdd.tx;
 		spi_transfer->rx_buf = lcdd.rx;
-		spi_transfer->len = transfer->byte_cnt;
-		memset(lcdd.tx, 0, TOT_MEM_SIZE);
+		spi_transfer->len = 3;
 		ret = copy_from_user(lcdd.tx, transfer->tx, 1);
 		if (ret) {
 			spi_transfer->tx_buf = NULL;
@@ -163,8 +132,6 @@ static int lcdd_message_send(struct spi_transfer *spi_transfer, uint8_t data_cmd
 	spi_message_add_tail(spi_transfer, &spi_message);
 	spi_message.complete = lcdd_complete_transfer;
 	spi_message.context = &done;
-	lcdd_set_data_cmd_pin(data_cmd);
-	udelay(1);
 	ret = spi_async(lcdd.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
@@ -180,12 +147,7 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 	struct lcdd_transfer lcdd_transfer;
 	struct spi_transfer spi_transfer;
 	int data_cmd;
-
-	if (op == SPI_IO_WR_DATA)
-		data_cmd = 1;
-	else
-		data_cmd = 0;
-
+	data_cmd = 0;
 	ret = lcdd_parse_user_data((const char __user *)arg, &lcdd_transfer);
 	if (ret)
 		goto err;
@@ -200,8 +162,8 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 		 * addition and subtraction to remove not important data
 		 * (answer for command write and dummy byte removed)
 		 */
-		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf + 2),
-			           spi_transfer.len - 2);
+		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf),
+			           spi_transfer.len);
 		if (ret) {
 			goto err;
 		}	
@@ -312,7 +274,6 @@ static int __init lcdd_init(void)
 		goto err;
 	}
 	lcdd_set_gpio();
-	lcdd_reset();
 	return 0;
 err:
 	if (lcdd.class)
