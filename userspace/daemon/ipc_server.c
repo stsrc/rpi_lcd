@@ -45,16 +45,12 @@ static inline int ipc_write_text(int fd, int socket,
 	int ret;
 	uint16_t cnt = 4 * sizeof(uint16_t);
 	ret = recv(socket, &buf->x, cnt, MSG_WAITALL);
-	if (ret != cnt) {
-		printf("recv 1\n");
+	if (ret != cnt)
 		return 1;
-	}
 	cnt = buf->dx;
 	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
-	if (ret != cnt) {
-		printf("recv 2\n");
+	if (ret != cnt)
 		return 1;
-	}
 	return lcd_draw_text(fd, buf);
 }
 
@@ -73,19 +69,40 @@ static inline int ipc_draw_bitmap(int fd, int socket,
 	return lcd_draw_bitmap(fd, buf);
 }
 
+static inline int ipc_draw_rectangle(int fd, int socket, 
+				     struct sockaddr_un *connected,
+				     struct ipc_buffer *buf)
+{
+
+	uint8_t red, green, blue;
+	int cnt = 4 * sizeof(uint16_t);
+	int ret = recv(socket, &buf->x, cnt, MSG_WAITALL);
+	if (ret != cnt)
+		return 1;
+	cnt = 1;
+	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
+	if (ret != cnt)
+		return 1;
+	lcd_return_colors(*buf->mem, &red, &green, &blue);
+	ret = lcd_draw_rectangle(fd, buf->x, buf->y, buf->dx, buf->dy, red,
+				 green, blue);
+	return ret;
+}
+
 static inline int ipc_action(int fd, int socket, struct sockaddr_un *connected, 
 			     struct ipc_buffer *buf) 
 {
 	int ret;
 	ret = recv(socket, &(buf->cmd), sizeof(buf->cmd), MSG_WAITALL);
-	if (ret != sizeof(buf->cmd)) {
+	if (ret != sizeof(buf->cmd))
 		return 1;
-	}
 	switch(buf->cmd) {
 	case WRITE_TEXT:
 		return ipc_write_text(fd, socket, connected, buf);
 	case WRITE_BITMAP:
 		return ipc_draw_bitmap(fd, socket, connected, buf);
+	case WRITE_RECTANGLE:
+		return ipc_draw_rectangle(fd, socket, connected, buf);
 	}
 	return 1;
 }

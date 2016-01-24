@@ -17,7 +17,7 @@
 #define LENGTH 240
 #define BY_PER_PIX 2
 #define TOT_MEM_SIZE BY_PER_PIX*HEIGHT*LENGTH
-#define SPI_SPEED 1953000
+#define SPI_SPEED 6600000
 
 #ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d\n", __FUNCTION__, \
@@ -38,47 +38,11 @@ struct lcdd {
 	struct class *class;
 	struct device *device;
 	struct spi_device *spi_device;
-	struct mutex spi_lock;
-};
-
-struct lcdd_transfer_bufs {
 	uint8_t *tx;
 	uint8_t *rx;
 };
 
 static struct lcdd lcdd;
-
-int lcdd_open(struct inode *inode, struct file *file)
-{
-	struct lcdd_transfer_bufs *bufs = kzalloc(sizeof(struct 
-					lcdd_transfer_bufs), GFP_KERNEL);
-	if (!bufs)
-		return -ENOMEM;
-	bufs->tx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
-	if (!bufs->tx) {
-		kfree(bufs);
-		bufs = NULL;
-		return -ENOMEM;
-	}
-	bufs->rx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
-	if (!bufs->rx) {
-		kfree(bufs->tx);
-		kfree(bufs);
-		bufs = NULL;
-		return -ENOMEM;
-	}
-	file->private_data = bufs;
-	return 0;
-}
-
-int lcdd_release(struct inode *inode, struct file *file)
-{
-	struct lcdd_transfer_bufs *bufs = file->private_data;
-	kfree(bufs->rx);
-	kfree(bufs->tx);
-	kfree(bufs);
-	return 0;
-}	
 
 struct lcdd_transfer {
 	uint32_t byte_cnt;
@@ -92,6 +56,29 @@ static struct gpio lcd_gpio[] = {
 	{ 25, GPIOF_OUT_INIT_HIGH, "RESET" },
 	{ 18, GPIOF_OUT_INIT_HIGH, "LED" }
 };
+
+int lcdd_open(struct inode *inode, struct file *file)
+{
+	lcdd.tx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
+	if (!lcdd.tx)
+		return -ENOMEM;
+	lcdd.rx = kmalloc(TOT_MEM_SIZE + 2, GFP_KERNEL);
+	if (!lcdd.rx) {
+		kfree(lcdd.tx);
+		return -ENOMEM;
+	}
+	file->private_data = &lcdd;
+	return 0;
+}
+
+int lcdd_release(struct inode *inode, struct file *file)
+{
+	kfree(lcdd.rx);
+	lcdd.rx = NULL;
+	kfree(lcdd.tx);
+	lcdd.tx = NULL;
+	return 0;
+}	
 
 static inline int lcdd_set_gpio(void)
 {
@@ -140,30 +127,28 @@ static int lcdd_parse_user_data(const char __user *message,
 }
 
 static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer, 
-				  struct spi_transfer *spi_transfer, 
-				  struct lcdd_transfer_bufs *bufs,
-				  int op)
+				  struct spi_transfer *spi_transfer, int op)
 {
 	int ret;
 	memset(spi_transfer, 0, sizeof(struct spi_transfer));
 	switch (op) {
 	case SPI_IO_WR_DATA:
 	case SPI_IO_WR_CMD:
-		spi_transfer->tx_buf = bufs->tx;
+		spi_transfer->tx_buf = lcdd.tx;
 		spi_transfer->len = transfer->byte_cnt;
-		memset(bufs->tx, 0, TOT_MEM_SIZE);
-		ret = copy_from_user(bufs->tx, transfer->tx, transfer->byte_cnt);
+		memset(lcdd.tx, 0, TOT_MEM_SIZE);
+		ret = copy_from_user(lcdd.tx, transfer->tx, transfer->byte_cnt);
 		if (ret) {
 			spi_transfer->tx_buf = NULL;
 			return -EAGAIN;
 		}
 		return 0;
 	case SPI_IO_RD_CMD:
-		spi_transfer->tx_buf = bufs->tx;
-		spi_transfer->rx_buf = bufs->rx;
+		spi_transfer->tx_buf = lcdd.tx;
+		spi_transfer->rx_buf = lcdd.rx;
 		spi_transfer->len = transfer->byte_cnt;
-		memset(bufs->tx, 0, TOT_MEM_SIZE);
-		ret = copy_from_user(bufs->tx, transfer->tx, 1);
+		memset(lcdd.tx, 0, TOT_MEM_SIZE);
+		ret = copy_from_user(lcdd.tx, transfer->tx, 1);
 		if (ret) {
 			spi_transfer->tx_buf = NULL;
 			spi_transfer->rx_buf = NULL;
@@ -211,13 +196,10 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 	else
 		data_cmd = 0;
 
-	mutex_lock(&lcdd.spi_lock);
 	ret = lcdd_parse_user_data((const char __user *)arg, &lcdd_transfer);
 	if (ret)
 		goto err;
-	ret = lcdd_init_spi_transfer(&lcdd_transfer, &spi_transfer,
-				     (struct lcdd_transfer_bufs *) 
-				     file->private_data, op);
+	ret = lcdd_init_spi_transfer(&lcdd_transfer, &spi_transfer, op);
 	if (ret) 
 		goto err;
 	ret = lcdd_message_send(&spi_transfer, data_cmd);
@@ -234,11 +216,9 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 			goto err;
 		}	
 	}
-	mutex_unlock(&lcdd.spi_lock);
 	return 1;
 err:
 	debug_message();
-	mutex_unlock(&lcdd.spi_lock);
 	return ret;
 }
 	
@@ -274,7 +254,7 @@ static int lcdd_spi_device_set(struct spi_device *spi)
 	return spi_setup(spi);	
 }
 
-static int spidev_probe(struct spi_device *spi)
+static int lcdd_probe(struct spi_device *spi)
 {
 	int ret;
 	if (spi->dev.of_node && !of_match_device(lcd_spi_dt_ids, &spi->dev)) {
@@ -295,11 +275,10 @@ static int spidev_probe(struct spi_device *spi)
 	ret = lcdd_spi_device_set(spi);
 	if (ret)
 		debug_message();
-	spi_set_drvdata(spi, &lcdd);
 	return 0;	
 }
 
-static int spidev_remove(struct spi_device *spi)
+static int lcdd_remove(struct spi_device *spi)
 {
 	device_destroy(lcdd.class, lcdd.devt);
 	return 0;
@@ -311,8 +290,8 @@ static struct spi_driver lcd_spi_driver = {
 		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(lcd_spi_dt_ids),
 	},
-	.probe = spidev_probe,
-	.remove = spidev_remove,
+	.probe = lcdd_probe,
+	.remove = lcdd_remove,
 };
 
 static int __init lcdd_init(void)
@@ -342,7 +321,6 @@ static int __init lcdd_init(void)
 		cdev_del(lcdd.cdev);
 		goto err;
 	}
-	mutex_init(&lcdd.spi_lock);
 	lcdd_set_gpio();
 	lcdd_reset();
 	return 0;

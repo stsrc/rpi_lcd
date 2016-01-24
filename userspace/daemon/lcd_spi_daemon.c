@@ -228,9 +228,9 @@ static int lcd_fill_rect_with_colour(uint8_t *tx, const uint32_t mem_size,
 	return 0;
 }
 
-static int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
-			      uint16_t height, uint8_t red, uint8_t green,
-			      uint8_t blue)
+int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length, 
+		       uint16_t height, uint8_t red, uint8_t green, 
+		       uint8_t blue)
 {
 	uint8_t *tx;
 	uint32_t mem_size;
@@ -289,6 +289,53 @@ static void lcd_colorize_text(uint8_t *mem, enum colors color)
 		return;
 	case brown:
 		lcd_color_prepare(31, 16, 16, mem);
+		return;
+	case background:
+		return;
+	default:
+		return;
+	}		
+	return;	
+}
+
+void lcd_return_colors(enum colors color, uint8_t *red_p, uint8_t *green_p,
+		       uint8_t *blue_p)
+{
+	switch(color) {
+	case black:
+		*red_p = 0;
+		*green_p = 0;
+		*blue_p = 0;
+		return;
+	case white:
+		*red_p = 31;
+		*green_p = 63;
+		*blue_p = 31;
+		return;
+	case red:
+		*red_p = 31;
+		*green_p = 0;
+		*blue_p = 0;
+		return;
+	case blue:
+		*red_p = 0;
+		*green_p = 0;
+		*blue_p = 31;
+		return;
+	case yellow:
+		*red_p = 31;
+		*green_p = 63;
+		*blue_p = 0;
+		return;
+	case green:
+		*red_p = 0;
+		*green_p = 63;
+		*blue_p = 0;
+		return;
+	case brown:
+		*red_p = 31;
+		*green_p = 16;
+		*blue_p = 16;
 		return;
 	case background:
 		return;
