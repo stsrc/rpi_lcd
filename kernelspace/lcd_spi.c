@@ -349,6 +349,7 @@ static int __init lcdd_init(void)
 	lcdd_set_gpio();
 	lcdd_reset();
 	register_touchpad_notifier(&lcdd_pressed);
+	add_timer(&lcdd_backlight_timer);
 	return 0;
 err:
 	if (lcdd.class)
@@ -360,6 +361,7 @@ err:
 static void __exit lcdd_exit(void)
 {
 	unregister_touchpad_notifier(&lcdd_pressed);
+	del_timer(&lcdd_backlight_timer);
 	lcdd_unset_gpio();
 	spi_unregister_driver(&lcd_spi_driver);
 	device_destroy(lcdd.class, lcdd.devt);
