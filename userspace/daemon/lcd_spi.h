@@ -5,8 +5,8 @@
  * This program is free software;
   */
 
-#ifndef SPIDEV_H
-#define SPIDEV_H
+#ifndef _LCD_SPI_H_
+#define _LCD_SPI_H_
 
 #include <stdint.h>
 #include <unistd.h>
@@ -27,7 +27,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 
 #include "ipc.h"
@@ -60,4 +59,4 @@ int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 		       uint16_t height, uint8_t red, uint8_t green, 
 		       uint8_t blue);
 
-#endif /* LCD_SPI_H */
+#endif /* _LCD_SPI_H_ */
