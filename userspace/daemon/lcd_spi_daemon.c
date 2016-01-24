@@ -1,4 +1,5 @@
 #include "lcd_spi.h"
+#include "ipc_server.h"
 #include "fonts.h"
 
 static void pabort(const char *s)

@@ -1,4 +1,4 @@
-#include "ipc.h"
+#include "ipc_server.h"
 
 static inline int ipc_make_socket(void)
 {
