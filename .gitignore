@@ -1,4 +1,5 @@
 lcd_spi_test
+lcd_spi_read
 lcd_spi_client
 lcd_spi_daemon
 *.o
