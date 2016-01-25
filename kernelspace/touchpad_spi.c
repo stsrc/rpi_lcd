@@ -8,12 +8,11 @@
 #include <linux/completion.h>
 #include <linux/gpio.h>
 #include <linux/spi/spi.h>
-#include <linux/delay.h>
 #include <linux/uaccess.h>
-#include <linux/mutex.h>
 #include <linux/interrupt.h>
 #include <linux/export.h>
 #include <linux/timer.h>
+#include <linux/spinlock.h>
 
 #include "touchpad_notifier.h"
 
@@ -28,32 +27,34 @@
 #endif
 
 #define SPI_IOC_MAGIC 'k'
-#define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
+#define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct touch_transfer)
 
-#define TIMER_DELAY 9 * HZ
+#define TIMER_DELAY  1 * HZ
 
-struct lcdd {
+struct touch {
 	struct cdev *cdev;
 	dev_t devt;
 	struct file_operations fops;
 	struct class *class;
 	struct device *device;
 	struct spi_device *spi_device;
+	uint8_t flag;
 	uint8_t *tx;
 	uint8_t *rx;
 	uint32_t irq;
+	spinlock_t lock;
 };
 
-static struct lcdd lcdd;
+static struct touch touch;
 
-struct lcdd_transfer {
+struct touch_transfer {
 	uint32_t byte_cnt;
 	const uint8_t __user *tx;
 	uint8_t __user *rx;
 };
 
 
-static struct gpio lcd_gpio[] = {
+static struct gpio touch_gpio[] = {
 	{ 23, GPIOF_IN, "IRQ" }
 };
 
@@ -73,47 +74,78 @@ int unregister_touchpad_notifier(struct notifier_block *nb)
 
 EXPORT_SYMBOL_GPL(unregister_touchpad_notifier);
 
-int lcdd_open(struct inode *inode, struct file *file)
+/*
+ * Interrupt handling routines:
+ *	touchpad_turn_on_interrupt
+ *	touchpad_interrupt
+ */
+
+void touchpad_turn_on_interrupt(unsigned long arg)
 {
-	lcdd.tx = kzalloc(3, GFP_KERNEL);
-	if (!lcdd.tx)
+	unsigned long flags;
+	spin_lock_irqsave(&touch.lock, flags);
+	touch.flag = 1;
+	spin_unlock_irqrestore(&touch.lock, flags);
+}
+
+static struct timer_list touchpad_timer;
+
+static irq_handler_t touchpad_interrupt(unsigned int irq, void *dev_id,
+					struct pt_regs *regs)
+{
+	int rt;
+	unsigned long flags;
+	spin_lock_irqsave(&touch.lock, flags);
+	if (touch.flag) {
+		rt = atomic_notifier_call_chain(&touchpad_notifier_list, 0, NULL); 
+		touch.flag = 0;
+	}
+	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
+	spin_unlock_irqrestore(&touch.lock, flags);
+	return (irq_handler_t)IRQ_HANDLED;
+}
+
+int touch_open(struct inode *inode, struct file *file)
+{
+	touch.tx = kzalloc(3, GFP_KERNEL);
+	if (!touch.tx)
 		return -ENOMEM;
-	lcdd.rx = kzalloc(3, GFP_KERNEL);
-	if (!lcdd.rx) {
-		kfree(lcdd.tx);
+	touch.rx = kzalloc(3, GFP_KERNEL);
+	if (!touch.rx) {
+		kfree(touch.tx);
 		return -ENOMEM;
 	}
-	file->private_data = &lcdd;
+	file->private_data = &touch;
 	return 0;
 }
 
-int lcdd_release(struct inode *inode, struct file *file)
+int touch_release(struct inode *inode, struct file *file)
 {
-	kfree(lcdd.rx);
-	lcdd.rx = NULL;
-	kfree(lcdd.tx);
-	lcdd.tx = NULL;
+	kfree(touch.rx);
+	touch.rx = NULL;
+	kfree(touch.tx);
+	touch.tx = NULL;
 	return 0;
 }	
 
-static inline int lcdd_set_gpio(void)
+static inline int touch_set_gpio(void)
 {
 	int ret;
-	ret = gpio_request_array(lcd_gpio, ARRAY_SIZE(lcd_gpio));
-	lcdd.irq = gpio_to_irq(lcd_gpio[0].gpio);
+	ret = gpio_request_array(touch_gpio, ARRAY_SIZE(touch_gpio));
+	touch.irq = gpio_to_irq(touch_gpio[0].gpio);
 	return ret;	
 }
 
-static inline void lcdd_unset_gpio(void)
+static inline void touch_unset_gpio(void)
 {
-	gpio_free_array(lcd_gpio, ARRAY_SIZE(lcd_gpio));
+	gpio_free_array(touch_gpio, ARRAY_SIZE(touch_gpio));
 }
 
-static int lcdd_parse_user_data(const char __user *message, 
-			        struct lcdd_transfer *transfer)
+static int touch_parse_user_data(const char __user *message, 
+			        struct touch_transfer *transfer)
 {
 	int ret = copy_from_user(transfer, message, 
-			     sizeof(struct lcdd_transfer));
+			     sizeof(struct touch_transfer));
 	if (ret)
 		return -EAGAIN;
 	else if (transfer->tx == NULL) {
@@ -123,17 +155,17 @@ static int lcdd_parse_user_data(const char __user *message,
 	return 0;
 }
 
-static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer, 
+static int touch_init_spi_transfer(struct touch_transfer *transfer, 
 				  struct spi_transfer *spi_transfer, int op)
 {
 	int ret;
 	memset(spi_transfer, 0, sizeof(struct spi_transfer));
 	switch (op) {
 	case SPI_IO_RD_CMD:
-		spi_transfer->tx_buf = lcdd.tx;
-		spi_transfer->rx_buf = lcdd.rx;
+		spi_transfer->tx_buf = touch.tx;
+		spi_transfer->rx_buf = touch.rx;
 		spi_transfer->len = 3;
-		ret = copy_from_user(lcdd.tx, transfer->tx, 1);
+		ret = copy_from_user(touch.tx, transfer->tx, 1);
 		if (ret) {
 			spi_transfer->tx_buf = NULL;
 			spi_transfer->rx_buf = NULL;
@@ -144,21 +176,21 @@ static int lcdd_init_spi_transfer(struct lcdd_transfer *transfer,
 }
 
 
-static void lcdd_complete_transfer(void *context)
+static void touch_complete_transfer(void *context)
 {
 	complete(context);
 }
 
-static int lcdd_message_send(struct spi_transfer *spi_transfer, uint8_t data_cmd)
+static int touch_message_send(struct spi_transfer *spi_transfer, uint8_t data_cmd)
 {
 	int ret;
 	struct spi_message spi_message;
 	DECLARE_COMPLETION_ONSTACK(done);
 	spi_message_init(&spi_message);
 	spi_message_add_tail(spi_transfer, &spi_message);
-	spi_message.complete = lcdd_complete_transfer;
+	spi_message.complete = touch_complete_transfer;
 	spi_message.context = &done;
-	ret = spi_async(lcdd.spi_device, &spi_message);
+	ret = spi_async(touch.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
 		return ret;
@@ -170,21 +202,21 @@ static int lcdd_message_send(struct spi_transfer *spi_transfer, uint8_t data_cmd
 static int touch_write(struct file *file, unsigned long arg, int op) 
 {
 	int ret;
-	struct lcdd_transfer lcdd_transfer;
+	struct touch_transfer touch_transfer;
 	struct spi_transfer spi_transfer;
 	int data_cmd;
 	data_cmd = 0;
-	ret = lcdd_parse_user_data((const char __user *)arg, &lcdd_transfer);
+	ret = touch_parse_user_data((const char __user *)arg, &touch_transfer);
 	if (ret) {
 		debug_message();
 		goto err;
 	}
-	ret = lcdd_init_spi_transfer(&lcdd_transfer, &spi_transfer, op);
+	ret = touch_init_spi_transfer(&touch_transfer, &spi_transfer, op);
 	if (ret) {
 		debug_message();
 		goto err;
 	}
-	ret = lcdd_message_send(&spi_transfer, data_cmd);
+	ret = touch_message_send(&spi_transfer, data_cmd);
 	if (ret) {
 		debug_message();
 		goto err;
@@ -194,7 +226,7 @@ static int touch_write(struct file *file, unsigned long arg, int op)
 		 * addition and subtraction to remove not important data
 		 * (answer for command write and dummy byte removed)
 		 */
-		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf),
+		ret = copy_to_user(touch_transfer.rx, (void *)(spi_transfer.rx_buf),
 			           spi_transfer.len);
 		if (ret) {
 			debug_message();
@@ -212,26 +244,26 @@ static long touch_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	return touch_write(file, arg, cmd);
 }
 
-static struct lcdd lcdd = {
+static struct touch touch = {
 	.cdev = NULL,
 	.devt = 0,
 	.class = NULL,
 	.fops = {.owner = THIS_MODULE,
-		.open = lcdd_open,
-		.release = lcdd_release,
+		.open = touch_open,
+		.release = touch_release,
 		.unlocked_ioctl = touch_ioctl,
 		.compat_ioctl = touch_ioctl
 	},
 	.device = NULL };
 
-static const struct of_device_id lcd_spi_dt_ids[] = {
+static const struct of_device_id touch_spi_dt_ids[] = {
 	{.compatible = DRIVER_NAME },
 	{},
 };
 
-MODULE_DEVICE_TABLE(of, lcd_spi_dt_ids);
+MODULE_DEVICE_TABLE(of, touch_spi_dt_ids);
 
-static int lcdd_spi_device_set(struct spi_device *spi)
+static int touch_spi_device_set(struct spi_device *spi)
 {
 	spi->max_speed_hz = SPI_SPEED;
 	spi->bits_per_word = 8;
@@ -239,141 +271,113 @@ static int lcdd_spi_device_set(struct spi_device *spi)
 	return spi_setup(spi);	
 }
 
-static int lcdd_probe(struct spi_device *spi)
+static int touch_probe(struct spi_device *spi)
 {
 	int ret;
-	if (spi->dev.of_node && !of_match_device(lcd_spi_dt_ids, &spi->dev)) {
+	if (spi->dev.of_node && !of_match_device(touch_spi_dt_ids, &spi->dev)) {
 		debug_message();
 		dev_err(&spi->dev, "buggy DT: touchpad_spi listed directly in DT\n");
 		WARN_ON(spi->dev.of_node &&
-			!of_match_device(lcd_spi_dt_ids, &spi->dev));
+			!of_match_device(touch_spi_dt_ids, &spi->dev));
 	}
-	lcdd.device = device_create(lcdd.class, &spi->dev, lcdd.devt, &lcdd, 
+	touch.device = device_create(touch.class, &spi->dev, touch.devt, &touch, 
 				    DRIVER_NAME);
 
-	if (IS_ERR(lcdd.device)) {
+	if (IS_ERR(touch.device)) {
 		debug_message();
 		dev_err(&spi->dev, "buggy DT: device already exists in system\n");
-		return PTR_ERR(lcdd.device);		
+		return PTR_ERR(touch.device);		
 	}
-	lcdd.spi_device = spi;
-	ret = lcdd_spi_device_set(spi);
+	touch.spi_device = spi;
+	ret = touch_spi_device_set(spi);
 	if (ret)
 		debug_message();
 	return 0;	
 }
 
-static int lcdd_remove(struct spi_device *spi)
+static int touch_remove(struct spi_device *spi)
 {
-	device_destroy(lcdd.class, lcdd.devt);
+	device_destroy(touch.class, touch.devt);
 	return 0;
 }
 
-static struct spi_driver lcd_spi_driver = {
+static struct spi_driver touch_spi_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
 		.owner = THIS_MODULE,
-		.of_match_table = of_match_ptr(lcd_spi_dt_ids),
+		.of_match_table = of_match_ptr(touch_spi_dt_ids),
 	},
-	.probe = lcdd_probe,
-	.remove = lcdd_remove,
+	.probe = touch_probe,
+	.remove = touch_remove,
 };
 
-void touchpad_turn_on_interrupt(unsigned long arg)
-{
-//	unsigned long flags;
-//	struct irq_desc *desc = irq_get_desc_buslock(lcdd.irq, &flags, 
-//						     IRQ_GET_DESC_CHECK_GLOBAL);
-	//TODO is it atomic?? CARE MUST BE TAKEN!
-	//if(desc->irq_data.chip->bus_lock || desc->chip->bus_sync_unlock) {
-	//	printk(KERN_EMERG "SERIOUS FAULT!\n");
-	//	debug_message();
-	//	return;
-	//}
-	enable_irq(lcdd.irq);
-}
-
-static struct timer_list touchpad_timer;
-
-static irq_handler_t touchpad_interrupt(unsigned int irq, void *dev_id,
-					struct pt_regs *regs)
+static int __init touch_init(void)
 {
 	int rt;
-	rt = atomic_notifier_call_chain(&touchpad_notifier_list, 0, NULL);
-	disable_irq_nosync(lcdd.irq);
-	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
-	if (rt) {
-		printk(KERN_EMERG "touchpad_spi: MOD_TIMER FAILED!\n");
-	}
-	return (irq_handler_t)IRQ_HANDLED;
-}
-
-static int __init lcdd_init(void)
-{
-	int rt;
-	rt = alloc_chrdev_region(&lcdd.devt, 0, 1, DRIVER_NAME);
+	rt = alloc_chrdev_region(&touch.devt, 0, 1, DRIVER_NAME);
 	if (rt)
 		return rt;
-	lcdd.class = class_create(THIS_MODULE, DRIVER_NAME);
-	if (IS_ERR(lcdd.class)) {
-		rt = PTR_ERR(lcdd.class);
+	touch.class = class_create(THIS_MODULE, DRIVER_NAME);
+	if (IS_ERR(touch.class)) {
+		rt = PTR_ERR(touch.class);
 		goto err;
 	}
-	lcdd.cdev = cdev_alloc();
-	if (!lcdd.cdev) {
+	touch.cdev = cdev_alloc();
+	if (!touch.cdev) {
 		rt = -ENOMEM;
 		goto err;
 	}
-	cdev_init(lcdd.cdev, &lcdd.fops);
-	rt = cdev_add(lcdd.cdev, lcdd.devt, 1);
+	cdev_init(touch.cdev, &touch.fops);
+	rt = cdev_add(touch.cdev, touch.devt, 1);
 	if (rt) {
-		cdev_del(lcdd.cdev);
+		cdev_del(touch.cdev);
 		goto err;
 	}
-	rt = spi_register_driver(&lcd_spi_driver);
+	rt = spi_register_driver(&touch_spi_driver);
 	if (rt < 0) {
-		cdev_del(lcdd.cdev);
+		cdev_del(touch.cdev);
 		goto err;
 	}
-	lcdd_set_gpio();
-	rt = request_irq(lcdd.irq, (irq_handler_t)touchpad_interrupt, 
+	spin_lock_init(&touch.lock);
+	touch_set_gpio();
+	rt = request_irq(touch.irq, (irq_handler_t)touchpad_interrupt, 
 			 IRQF_TRIGGER_FALLING, "touchpad_interrupt",
 			 NULL);
 	if (rt) {
-		cdev_del(lcdd.cdev);
-		lcdd_unset_gpio();
+		cdev_del(touch.cdev);
+		touch_unset_gpio();
 		goto err;
 	}
 	setup_timer(&touchpad_timer, touchpad_turn_on_interrupt, 0);
 	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
 	if (rt) {
 		debug_message();
-		cdev_del(lcdd.cdev);
-		lcdd_unset_gpio();
-		free_irq(lcdd.irq, NULL);
+		cdev_del(touch.cdev);
+		touch_unset_gpio();
+		free_irq(touch.irq, NULL);
 		goto err;
 	}
 	return 0;
 err:
-	if (lcdd.class)
-		class_destroy(lcdd.class);
-	unregister_chrdev_region(lcdd.devt, 1);
+	if (touch.class)
+		class_destroy(touch.class);
+	unregister_chrdev_region(touch.devt, 1);
 	return rt;
 }
 
-static void __exit lcdd_exit(void)
+static void __exit touch_exit(void)
 {
-	free_irq(lcdd.irq, NULL);
-	lcdd_unset_gpio();
-	spi_unregister_driver(&lcd_spi_driver);
-	device_destroy(lcdd.class, lcdd.devt);
-	cdev_del(lcdd.cdev);
-	class_destroy(lcdd.class);
-	unregister_chrdev_region(lcdd.devt, 1);
+	free_irq(touch.irq, NULL);
+	touch_unset_gpio();
+	spi_unregister_driver(&touch_spi_driver);
+	device_destroy(touch.class, touch.devt);
+	cdev_del(touch.cdev);
+	class_destroy(touch.class);
+	unregister_chrdev_region(touch.devt, 1);
 }
 
-module_init(lcdd_init);
-module_exit(lcdd_exit);
+module_init(touch_init);
+module_exit(touch_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("spi:touchpad_spi");

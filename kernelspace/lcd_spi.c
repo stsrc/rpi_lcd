@@ -10,10 +10,10 @@
 #include <linux/spi/spi.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
-#include <linux/mutex.h>
+#include <linux/spinlock.h>
 
 #include <linux/timer.h>
-#include <asm-generic/param.h>
+#include <linux/moduleparam.h>
 
 #include "touchpad_notifier.h"
 
@@ -36,7 +36,11 @@
 #define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 
-#define BACKLIGHT_DELAY		10 * HZ
+unsigned int delay_time = 10;
+module_param(delay_time, uint, S_IRUGO);
+EXPORT_SYMBOL(delay_time);
+
+#define BACKLIGHT_DELAY		delay_time * HZ
 
 struct lcdd {
 	struct cdev *cdev;
@@ -47,6 +51,7 @@ struct lcdd {
 	struct spi_device *spi_device;
 	uint8_t *tx;
 	uint8_t *rx;
+	spinlock_t lock;
 };
 
 static struct lcdd lcdd;
@@ -64,10 +69,18 @@ static struct gpio lcd_gpio[] = {
 	{ 18, GPIOF_OUT_INIT_HIGH, "LED" }
 };
 
+/*
+ * Interrupt handling routines:
+ *	lcdd_backlight_timer_handler
+ *	lcdd_notf_pressed
+ */
 
 void lcdd_backlight_timer_handler(unsigned long arg)
 {
+	unsigned long flags;
+	spin_lock_irqsave(&lcdd.lock, flags);
 	gpio_set_value(lcd_gpio[2].gpio, 0);
+	spin_unlock_irqrestore(&lcdd.lock, flags);
 }
 
 static struct timer_list lcdd_backlight_timer;
@@ -75,8 +88,11 @@ static struct timer_list lcdd_backlight_timer;
 static int lcdd_notf_pressed(struct notifier_block *nblock, unsigned long code,
 			     void *_param)
 {
+	unsigned long flags;
+	spin_lock_irqsave(&lcdd.lock, flags);
 	mod_timer(&lcdd_backlight_timer, jiffies + BACKLIGHT_DELAY);
 	gpio_set_value(lcd_gpio[2].gpio, 1);
+	spin_unlock_irqrestore(&lcdd.lock, flags);
 	return 0;
 }
 
@@ -348,6 +364,7 @@ static int __init lcdd_init(void)
 		cdev_del(lcdd.cdev);
 		goto err;
 	}
+	spin_lock_init(&lcdd.lock);
 	lcdd_set_gpio();
 	lcdd_reset();
 	setup_timer(&lcdd_backlight_timer, lcdd_backlight_timer_handler, 0);

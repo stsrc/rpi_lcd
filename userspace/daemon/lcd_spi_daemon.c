@@ -214,19 +214,16 @@ int lcd_read_touchscreen(int fd, uint16_t *x, uint16_t *y, uint16_t *z)
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);	
 	value = touch_generate_short(rx[1], rx[2]);
-	printf("x 12bit val = %hu\n", value);
 	touch_calculate_pos(value, x, 240);
 	inp.A2 = 0;
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);
 	value = touch_generate_short(rx[1], rx[2]);
-	printf("y 12bit val = %hu\n", value);
 	touch_calculate_pos(value, y, 320);
 	inp.A1 = 1;
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);
 	value = touch_generate_short(rx[1], rx[2]);
-	printf("z 12bit val = %hu\n", value);
 	touch_calculate_pos(value, z, 320);
 	return 0;
 }
@@ -392,7 +389,7 @@ static void lcd_colorize_text(uint8_t *mem, enum colors color)
 		lcd_color_prepare(0, 63, 0, mem);
 		return;
 	case brown:
-		lcd_color_prepare(31, 16, 16, mem);
+		lcd_color_prepare(31, 31, 0, mem);
 		return;
 	case background:
 		return;
@@ -438,8 +435,8 @@ void lcd_return_colors(enum colors color, uint8_t *red_p, uint8_t *green_p,
 		return;
 	case brown:
 		*red_p = 31;
-		*green_p = 16;
-		*blue_p = 16;
+		*green_p = 31;
+		*blue_p = 0;
 		return;
 	case background:
 		return;
@@ -633,7 +630,7 @@ int main(int argc, char *argv[])
 		close(fd_lcd);
 		pabort("can't open device");
 	}
-	//switch_to_daemon(fd_lcd, fd_touch);
+//	switch_to_daemon(fd_lcd, fd_touch);
 	lcd_init(fd_lcd, fd_touch);
 	lcd_clear_background(fd_lcd);
 	ipc_main(fd_lcd, fd_touch);
