@@ -38,7 +38,7 @@ struct touch {
 	struct class *class;
 	struct device *device;
 	struct spi_device *spi_device;
-	uint8_t flag;
+	volatile uint8_t flag;
 	uint8_t *tx;
 	uint8_t *rx;
 	uint32_t irq;
@@ -190,12 +190,14 @@ static int touch_message_send(struct spi_transfer *spi_transfer, uint8_t data_cm
 	spi_message_add_tail(spi_transfer, &spi_message);
 	spi_message.complete = touch_complete_transfer;
 	spi_message.context = &done;
+	disable_irq_nosync(touch.irq);
 	ret = spi_async(touch.spi_device, &spi_message);
 	if (ret) {
 		debug_message();
 		return ret;
 	}
 	wait_for_completion(&done);
+	enable_irq(touch.irq);
 	return 0;
 }
 

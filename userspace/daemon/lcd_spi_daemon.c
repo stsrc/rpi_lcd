@@ -3,17 +3,12 @@
 #include "fonts.h"
 #include <math.h>
 
-static void pabort(const char *s)
-{
-	perror(s);
-	abort();
-}
 
 static const char *device_lcd = "/dev/lcd_spi";
 static const char *device_touch = "/dev/touchpad_spi";
 
-static void transfer(int fd, uint8_t *tx, uint8_t *rx, uint32_t n, 
-		     unsigned int cmd)
+static int transfer(int fd, uint8_t *tx, uint8_t *rx, uint32_t n, 
+		    unsigned int cmd)
 {
 	int ret;
 	struct lcdd_transfer tr = {
@@ -23,33 +18,8 @@ static void transfer(int fd, uint8_t *tx, uint8_t *rx, uint32_t n,
 	};
 	ret = ioctl(fd, cmd, &tr);
 	if (ret < 1)
-		pabort("ioctl");
-}
-
-static void make_byte(char *byte, uint8_t value) 
-{
-	for (int i = 0; i < 8; i++) {
-		if (value & (1 << i))
-			byte[7 - i] = '1';
-		else
-			byte[7 - i] = '0';
-	}	
-	byte[8] = '\0';
-}
-
-void print_transfer(int data_cmd, uint8_t *tx, uint8_t *rx, uint32_t n)
-{
-	char byte[9];
-	for (int i = 0; i < n; i++) {
-		if (data_cmd) 
-			printf("Transfered data: %xh. Received data: %xh.\n",
-			       tx[i], rx[i]);
-		else
-			printf("Transfered command: %xh. Received byte: %xh.\n",
-		               tx[i], rx[i]);
-		make_byte(byte, rx[i]);
-		printf("Received byte: %s\n", byte);
-	}
+		return ret;
+	return 0;
 }
 
 void print_buf(uint8_t *buf, int size)
@@ -98,7 +68,7 @@ static int transfer_wr_cmd_data(int fd, int arg_cnt, ... )
 	}
 	tx = malloc(sizeof(uint8_t)*(arg_cnt - 1));
 	if (check_clean_mem(tx, NULL, 0))
-		pabort("No mem.");
+		return -1;
 	for (int i = 0; i < arg_cnt - 1; i++)
 		tx[i] = va_arg(arg_list, int);
 	va_end(arg_list);
@@ -335,18 +305,23 @@ int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 {
 	uint8_t *tx;
 	uint32_t mem_size;
-	if (x + length > LENGTH_MAX)
-		pabort("Wrong parameters");
-	else if (y + height > HEIGHT_MAX)
-		pabort("Wrong parameters");
+	if (x + length > LENGTH_MAX) {
+		errno = EINVAL;
+		return -1;
+	} else if (y + height > HEIGHT_MAX) {
+		errno = EINVAL;
+		return -1;
+	}
 	mem_size = BY_PER_PIX * height * length;
 	tx = malloc(mem_size);
-	if (check_clean_mem(tx, NULL, 0))
-		pabort("No memory.");
+	if (check_clean_mem(tx, NULL, 0)) {
+		return -1;
+	}
 	lcd_set_rectangle(fd, x, y, length, height);
 	if (lcd_fill_rect_with_colour(tx, mem_size, red, green, blue)) {
 		free(tx);
-		pabort("Wrong colours.");
+		errno = EINVAL;
+		return -1;
 	}
 	lcd_draw(fd, tx, NULL, mem_size);
 	free(tx);
@@ -505,10 +480,13 @@ void lcd_converse_colors(uint8_t *mem, uint8_t *mem_out, uint32_t size)
 
 static inline int lcd_check_input(struct ipc_buffer *buf)
 {
-	if (buf->x >= LENGTH_MAX / FONT_X_LEN)
-		return 1;
-	else if (buf->y >= HEIGHT_MAX / FONT_Y_LEN)
-		return 1;
+	if (buf->x >= LENGTH_MAX / FONT_X_LEN) {
+		errno = EINVAL;
+		return -1;
+	} else if (buf->y >= HEIGHT_MAX / FONT_Y_LEN) {
+		errno = EINVAL;
+		return -1;
+	}
 	return 0;
 }
 
@@ -550,13 +528,15 @@ int lcd_draw_text(int fd, struct ipc_buffer *buf)
 {
 	uint8_t *mem, *mem_out, line_cnt, mode;
 	uint32_t pix_cnt;
-	if (lcd_check_input(buf)) 
-		return 1;
+	if (lcd_check_input(buf))
+		return -1;
 	pix_cnt = lcd_set_text_area(fd, buf, &line_cnt, &mode);
 	mem = malloc(pix_cnt * 3);
 	mem_out = malloc(pix_cnt * 2);
-	if ((!mem) || (!mem_out))
-		return 1;
+	if ((!mem) || (!mem_out)) {
+		errno = ENOMEM;
+		return -1;
+	}
 	transfer_rd_d(fd, pix_cnt * 3, 0x2E, mem);
 	lcd_converse_colors(mem, mem_out, pix_cnt * 3);
 	lcd_put_text(mem_out, buf, line_cnt, mode);
@@ -570,11 +550,9 @@ int lcd_draw_bitmap(int fd, struct ipc_buffer *buf)
 {
 	if (buf->x + buf->dx > LENGTH_MAX) {
 		errno = EINVAL;
-		printf("1. lcd_draw_bitmap\n");
 		return -1;
 	} else if (buf->y + buf->dy > HEIGHT_MAX) {
 		errno = EINVAL;
-		printf("2. lcd_draw_bitmap\n");
 		return -1;
 	}
 	lcd_set_rectangle(fd, buf->x, buf->y, buf->dx, buf->dy);
@@ -623,14 +601,14 @@ int main(int argc, char *argv[])
 {
 	int fd_lcd, fd_touch;
 	fd_lcd = open(device_lcd, O_RDWR);
-	if (fd_lcd < 0)
-		pabort("can't open device");
+	if (fd_lcd < 0) 
+		return -1;
 	fd_touch = open(device_touch, O_RDWR);
 	if (fd_touch < 0) {
 		close(fd_lcd);
-		pabort("can't open device");
+		return -1;
 	}
-//	switch_to_daemon(fd_lcd, fd_touch);
+	switch_to_daemon(fd_lcd, fd_touch);
 	lcd_init(fd_lcd, fd_touch);
 	lcd_clear_background(fd_lcd);
 	ipc_main(fd_lcd, fd_touch);
