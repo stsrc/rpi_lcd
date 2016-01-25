@@ -3,6 +3,6 @@
 
 #include "ipc.h"
 
-int ipc_main(int fd);
+int ipc_main(int fd_lcd, int fd_touch);
 
 #endif

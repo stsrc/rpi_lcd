@@ -36,7 +36,7 @@
 #define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 
-#define BACKLIGHT_DELAY		25 * HZ
+#define BACKLIGHT_DELAY		10 * HZ
 
 struct lcdd {
 	struct cdev *cdev;

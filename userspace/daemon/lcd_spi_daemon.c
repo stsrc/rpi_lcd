@@ -173,7 +173,7 @@ static uint16_t touch_generate_short(uint8_t byte_1, uint16_t byte_2)
 
 static void touch_calculate_pos(uint16_t input, uint16_t *val, uint16_t max)
 {
-	float temp = ((float)input)/4096.0f;
+	float temp = ((float)input)/2000.0f;
 	temp = ((float)max)*temp;
 	*val = floor(temp + 0.5f); 
 }
@@ -190,7 +190,6 @@ static void lcd_init_touchscreen(int fd)
 		.PID1 = 0,
 		.PID0 = 0
 	};
-	uint16_t value;
 	uint8_t rx[3];
 	uint8_t cmd;
 	cmd = touch_generate_command(&inp);
@@ -215,17 +214,19 @@ int lcd_read_touchscreen(int fd, uint16_t *x, uint16_t *y, uint16_t *z)
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);	
 	value = touch_generate_short(rx[1], rx[2]);
+	printf("x 12bit val = %hu\n", value);
 	touch_calculate_pos(value, x, 240);
 	inp.A2 = 0;
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);
 	value = touch_generate_short(rx[1], rx[2]);
+	printf("y 12bit val = %hu\n", value);
 	touch_calculate_pos(value, y, 320);
 	inp.A1 = 1;
-	inp.A2 = 1;
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);
 	value = touch_generate_short(rx[1], rx[2]);
+	printf("z 12bit val = %hu\n", value);
 	touch_calculate_pos(value, z, 320);
 	return 0;
 }
@@ -591,7 +592,7 @@ int lcd_clear_background(int fd)
 }
 
 
-int switch_to_daemon(int fd)
+int switch_to_daemon(int fd_lcd, int fd_touch)
 {
 	pid_t pid;
 	pid = fork();
@@ -601,7 +602,8 @@ int switch_to_daemon(int fd)
 	case 0:
 		break;
 	default:
-		close(fd);
+		close(fd_lcd);
+		close(fd_touch);
 		exit(0);
 	}
 	umask(0);
@@ -631,10 +633,11 @@ int main(int argc, char *argv[])
 		close(fd_lcd);
 		pabort("can't open device");
 	}
-	//switch_to_daemon(fd);
+	//switch_to_daemon(fd_lcd, fd_touch);
 	lcd_init(fd_lcd, fd_touch);
 	lcd_clear_background(fd_lcd);
 	ipc_main(fd_lcd, fd_touch);
-	close(fd);
+	close(fd_lcd);
+	close(fd_touch);
 	return 0;
 }

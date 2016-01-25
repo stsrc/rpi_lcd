@@ -97,9 +97,9 @@ static inline int ipc_read_touchscreen(int fd, int socket,
 	ret = lcd_read_touchscreen(fd, &x, &y, &z);
 	if (ret)
 		return 1;
-	send(socket, x, 2, 0);
-	send(socket, y, 2, 0);
-	send(socket, z, 2, 0);
+	send(socket, &x, 2, 0);
+	send(socket, &y, 2, 0);
+	send(socket, &z, 2, 0);
 	return 0;
 }
 

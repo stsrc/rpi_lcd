@@ -18,7 +18,7 @@
 #include "touchpad_notifier.h"
 
 #define DRIVER_NAME "touchpad_spi"
-#define SPI_SPEED 9600
+#define SPI_SPEED 100000
 
 #ifdef DEBUG
 #define debug_message() printk(KERN_EMERG "DEBUG %s %d\n", __FUNCTION__, \
@@ -28,9 +28,9 @@
 #endif
 
 #define SPI_IOC_MAGIC 'k'
-#define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
+#define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 
-#define TIMER_DELAY 25 * HZ
+#define TIMER_DELAY 9 * HZ
 
 struct lcdd {
 	struct cdev *cdev;
@@ -47,6 +47,7 @@ struct lcdd {
 static struct lcdd lcdd;
 
 struct lcdd_transfer {
+	uint32_t byte_cnt;
 	const uint8_t __user *tx;
 	uint8_t __user *rx;
 };
@@ -166,7 +167,7 @@ static int lcdd_message_send(struct spi_transfer *spi_transfer, uint8_t data_cmd
 	return 0;
 }
 
-static int lcdd_write(struct file *file, unsigned long arg, int op) 
+static int touch_write(struct file *file, unsigned long arg, int op) 
 {
 	int ret;
 	struct lcdd_transfer lcdd_transfer;
@@ -174,14 +175,20 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 	int data_cmd;
 	data_cmd = 0;
 	ret = lcdd_parse_user_data((const char __user *)arg, &lcdd_transfer);
-	if (ret)
+	if (ret) {
+		debug_message();
 		goto err;
+	}
 	ret = lcdd_init_spi_transfer(&lcdd_transfer, &spi_transfer, op);
-	if (ret) 
+	if (ret) {
+		debug_message();
 		goto err;
+	}
 	ret = lcdd_message_send(&spi_transfer, data_cmd);
-	if (ret)
+	if (ret) {
+		debug_message();
 		goto err;
+	}
 	if (op == SPI_IO_RD_CMD) {
 		/*
 		 * addition and subtraction to remove not important data
@@ -190,6 +197,7 @@ static int lcdd_write(struct file *file, unsigned long arg, int op)
 		ret = copy_to_user(lcdd_transfer.rx, (void *)(spi_transfer.rx_buf),
 			           spi_transfer.len);
 		if (ret) {
+			debug_message();
 			goto err;
 		}	
 	}
@@ -199,9 +207,9 @@ err:
 	return ret;
 }
 	
-static long lcdd_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+static long touch_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {	
-	return lcdd_write(file, arg, cmd);
+	return touch_write(file, arg, cmd);
 }
 
 static struct lcdd lcdd = {
@@ -211,8 +219,8 @@ static struct lcdd lcdd = {
 	.fops = {.owner = THIS_MODULE,
 		.open = lcdd_open,
 		.release = lcdd_release,
-		.unlocked_ioctl = lcdd_ioctl,
-		.compat_ioctl = lcdd_ioctl
+		.unlocked_ioctl = touch_ioctl,
+		.compat_ioctl = touch_ioctl
 	},
 	.device = NULL };
 
@@ -295,7 +303,7 @@ static irq_handler_t touchpad_interrupt(unsigned int irq, void *dev_id,
 	disable_irq_nosync(lcdd.irq);
 	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
 	if (rt) {
-		printk(KERN_EMERG "MOD_TIMER FAILED!\n");
+		printk(KERN_EMERG "touchpad_spi: MOD_TIMER FAILED!\n");
 	}
 	return (irq_handler_t)IRQ_HANDLED;
 }

@@ -6,7 +6,7 @@
 #define WRITE_TEXT	1
 #define WRITE_BITMAP	2
 #define WRITE_RECTANGLE 3
-#define READ_TEOUCHSCREEN 4
+#define READ_TOUCHSCREEN 4
 
 struct ipc_buffer {
 	int cmd;
