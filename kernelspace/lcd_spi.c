@@ -36,6 +36,8 @@
 #define SPI_IO_WR_CMD		_IOW(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 7, struct lcdd_transfer)
 
+#define BACKLIGHT_DELAY		25 * HZ
+
 struct lcdd {
 	struct cdev *cdev;
 	dev_t devt;
@@ -68,12 +70,12 @@ void lcdd_backlight_timer_handler(unsigned long arg)
 	gpio_set_value(lcd_gpio[2].gpio, 0);
 }
 
-DEFINE_TIMER(lcdd_backlight_timer, lcdd_backlight_timer_handler, 5 * HZ, 0);
-
+static struct timer_list lcdd_backlight_timer;
 
 static int lcdd_notf_pressed(struct notifier_block *nblock, unsigned long code,
 			     void *_param)
 {
+	mod_timer(&lcdd_backlight_timer, jiffies + BACKLIGHT_DELAY);
 	gpio_set_value(lcd_gpio[2].gpio, 1);
 	return 0;
 }
@@ -348,8 +350,20 @@ static int __init lcdd_init(void)
 	}
 	lcdd_set_gpio();
 	lcdd_reset();
-	register_touchpad_notifier(&lcdd_pressed);
-	add_timer(&lcdd_backlight_timer);
+	setup_timer(&lcdd_backlight_timer, lcdd_backlight_timer_handler, 0);
+	rt = mod_timer(&lcdd_backlight_timer, jiffies + BACKLIGHT_DELAY);
+	if (rt) {
+		debug_message();
+		cdev_del(lcdd.cdev);
+		goto err;
+	}
+	rt = register_touchpad_notifier(&lcdd_pressed);
+	if (rt) {
+		debug_message();
+		cdev_del(lcdd.cdev);
+		del_timer(&lcdd_backlight_timer);
+		goto err;
+	}
 	return 0;
 err:
 	if (lcdd.class)

@@ -59,53 +59,15 @@ int switch_to_daemon(int fd)
 }
 
 
-struct cmd_input {
-	uint8_t START;
-	uint8_t A2;
-	uint8_t A1;
-	uint8_t A0; 
-	uint8_t MODE; 
-	uint8_t SER_DFR;
-	uint8_t PID1;
-	uint8_t PID0;
-};
 
-static uint8_t generate_command(struct cmd_input *in)
-{
-	uint8_t ret = 0;
-	if (in->START)
-		ret = 1 << 7;
-	if (in->A2)
-		ret |= 1 << 6;
-	if (in->A1)
-		ret |= 1 << 5;
-	if (in->A0)
-		ret |= 1 << 4;
-	if (in->MODE)
-		ret |= 1 << 3;
-	if (in->SER_DFR)
-		ret |= 1 << 2;
-	if (in->PID1)
-		ret |= 1 << 1;
-	if (in->PID0)
-		ret |= 1;
-	return ret;
-}
+
+
 
 static int test(int fd)
 {
 	int ret;
 	uint8_t rx[3];
-	struct cmd_input inp = {
-		.START = 1,
-		.A2 = 0,
-		.A1 = 1,
-		.A0 = 1,
-		.MODE = 0,
-		.SER_DFR = 0,
-		.PID1 = 0,
-		.PID0 = 0
-	};
+
 	uint8_t cmd = generate_command(&inp);
 	ret = transfer_rd_d(fd, cmd, rx);
 	if (ret) {

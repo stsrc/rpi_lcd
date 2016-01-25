@@ -58,5 +58,5 @@ void lcd_return_colors(enum colors color, uint8_t *red, uint8_t *green,
 int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 		       uint16_t height, uint8_t red, uint8_t green, 
 		       uint8_t blue);
-
+int lcd_read_touchscreen(int fd, uint16_t x, uint16_t y, uint16_t z);
 #endif /* _LCD_SPI_H_ */

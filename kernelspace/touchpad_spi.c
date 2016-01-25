@@ -13,6 +13,7 @@
 #include <linux/mutex.h>
 #include <linux/interrupt.h>
 #include <linux/export.h>
+#include <linux/timer.h>
 
 #include "touchpad_notifier.h"
 
@@ -28,6 +29,8 @@
 
 #define SPI_IOC_MAGIC 'k'
 #define SPI_IO_RD_CMD		_IOR(SPI_IOC_MAGIC, 8, struct lcdd_transfer)
+
+#define TIMER_DELAY 25 * HZ
 
 struct lcdd {
 	struct cdev *cdev;
@@ -268,12 +271,33 @@ static struct spi_driver lcd_spi_driver = {
 	.remove = lcdd_remove,
 };
 
+void touchpad_turn_on_interrupt(unsigned long arg)
+{
+//	unsigned long flags;
+//	struct irq_desc *desc = irq_get_desc_buslock(lcdd.irq, &flags, 
+//						     IRQ_GET_DESC_CHECK_GLOBAL);
+	//TODO is it atomic?? CARE MUST BE TAKEN!
+	//if(desc->irq_data.chip->bus_lock || desc->chip->bus_sync_unlock) {
+	//	printk(KERN_EMERG "SERIOUS FAULT!\n");
+	//	debug_message();
+	//	return;
+	//}
+	enable_irq(lcdd.irq);
+}
+
+static struct timer_list touchpad_timer;
+
 static irq_handler_t touchpad_interrupt(unsigned int irq, void *dev_id,
 					struct pt_regs *regs)
 {
 	int rt;
 	rt = atomic_notifier_call_chain(&touchpad_notifier_list, 0, NULL);
-	return (irq_handler_t) IRQ_HANDLED;
+	disable_irq_nosync(lcdd.irq);
+	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
+	if (rt) {
+		printk(KERN_EMERG "MOD_TIMER FAILED!\n");
+	}
+	return (irq_handler_t)IRQ_HANDLED;
 }
 
 static int __init lcdd_init(void)
@@ -307,9 +331,18 @@ static int __init lcdd_init(void)
 	rt = request_irq(lcdd.irq, (irq_handler_t)touchpad_interrupt, 
 			 IRQF_TRIGGER_FALLING, "touchpad_interrupt",
 			 NULL);
-	printk(KERN_EMERG "touchpad_spi: request_irq result: %d\n", rt);
 	if (rt) {
 		cdev_del(lcdd.cdev);
+		lcdd_unset_gpio();
+		goto err;
+	}
+	setup_timer(&touchpad_timer, touchpad_turn_on_interrupt, 0);
+	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
+	if (rt) {
+		debug_message();
+		cdev_del(lcdd.cdev);
+		lcdd_unset_gpio();
+		free_irq(lcdd.irq, NULL);
 		goto err;
 	}
 	return 0;

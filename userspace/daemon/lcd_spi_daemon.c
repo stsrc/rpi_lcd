@@ -1,6 +1,7 @@
 #include "lcd_spi.h"
 #include "ipc_server.h"
 #include "fonts.h"
+#include <math.h>
 
 static void pabort(const char *s)
 {
@@ -8,7 +9,8 @@ static void pabort(const char *s)
 	abort();
 }
 
-static const char *device = "/dev/lcd_spi";
+static const char *device_lcd = "/dev/lcd_spi";
+static const char *device_touch = "/dev/touchpad_spi";
 
 static void transfer(int fd, uint8_t *tx, uint8_t *rx, uint32_t n, 
 		     unsigned int cmd)
@@ -129,7 +131,106 @@ static int lcd_set_LUT(int fd)
 	return 0;
 }
 
-static void lcd_init(int fd)
+struct cmd_input {
+	uint8_t START;
+	uint8_t A2;
+	uint8_t A1;
+	uint8_t A0; 
+	uint8_t MODE; 
+	uint8_t SER_DFR;
+	uint8_t PID1;
+	uint8_t PID0;
+};
+
+static uint8_t touch_generate_command(struct cmd_input *in)
+{
+	uint8_t ret = 0;
+	if (in->START)
+		ret = 1 << 7;
+	if (in->A2)
+		ret |= 1 << 6;
+	if (in->A1)
+		ret |= 1 << 5;
+	if (in->A0)
+		ret |= 1 << 4;
+	if (in->MODE)
+		ret |= 1 << 3;
+	if (in->SER_DFR)
+		ret |= 1 << 2;
+	if (in->PID1)
+		ret |= 1 << 1;
+	if (in->PID0)
+		ret |= 1;
+	return ret;
+}
+
+static uint16_t touch_generate_short(uint8_t byte_1, uint16_t byte_2)
+{
+	uint16_t ret = byte_1 << 4;
+	ret |= byte_2 >> 4;
+	return ret;
+}
+
+static void touch_calculate_pos(uint16_t input, uint16_t *val, uint16_t max)
+{
+	float temp = ((float)input)/4096.0f;
+	temp = ((float)max)*temp;
+	*val = floor(temp + 0.5f); 
+}
+
+static void lcd_init_touchscreen(int fd)
+{
+	struct cmd_input inp = {
+		.START = 1,
+		.A2 = 1,
+		.A1 = 0,
+		.A0 = 1,
+		.MODE = 0,
+		.SER_DFR = 0,
+		.PID1 = 0,
+		.PID0 = 0
+	};
+	uint16_t value;
+	uint8_t rx[3];
+	uint8_t cmd;
+	cmd = touch_generate_command(&inp);
+	transfer_rd_d(fd, 3, cmd, rx);	
+}
+
+int lcd_read_touchscreen(int fd, uint16_t *x, uint16_t *y, uint16_t *z) 
+{
+	struct cmd_input inp = {
+		.START = 1,
+		.A2 = 1,
+		.A1 = 0,
+		.A0 = 1,
+		.MODE = 0,
+		.SER_DFR = 0,
+		.PID1 = 0,
+		.PID0 = 0
+	};
+	uint16_t value;
+	uint8_t rx[3];
+	uint8_t cmd;
+	cmd = touch_generate_command(&inp);
+	transfer_rd_d(fd, 3, cmd, rx);	
+	value = touch_generate_short(rx[1], rx[2]);
+	touch_calculate_pos(value, x, 240);
+	inp.A2 = 0;
+	cmd = touch_generate_command(&inp);
+	transfer_rd_d(fd, 3, cmd, rx);
+	value = touch_generate_short(rx[1], rx[2]);
+	touch_calculate_pos(value, y, 320);
+	inp.A1 = 1;
+	inp.A2 = 1;
+	cmd = touch_generate_command(&inp);
+	transfer_rd_d(fd, 3, cmd, rx);
+	value = touch_generate_short(rx[1], rx[2]);
+	touch_calculate_pos(value, z, 320);
+	return 0;
+}
+
+static void lcd_init(int fd, int fd_touch)
 {
 	struct timespec req;
 	/*Reset*/
@@ -156,6 +257,7 @@ static void lcd_init(int fd)
 	transfer_wr_cmd_data(fd, 2, 0x51, 0x12);
 	nanosleep(&req, NULL);
 	lcd_set_LUT(fd);	
+	lcd_init_touchscreen(fd_touch);
 }
 
 static inline void lcd_create_bytes(uint16_t value, uint8_t *older, uint8_t *younger)
@@ -488,6 +590,7 @@ int lcd_clear_background(int fd)
 				  0, 0);
 }
 
+
 int switch_to_daemon(int fd)
 {
 	pid_t pid;
@@ -519,14 +622,19 @@ int switch_to_daemon(int fd)
 
 int main(int argc, char *argv[])
 {
-	int fd;
-	fd = open(device, O_RDWR);
-	if (fd < 0)
+	int fd_lcd, fd_touch;
+	fd_lcd = open(device_lcd, O_RDWR);
+	if (fd_lcd < 0)
 		pabort("can't open device");
+	fd_touch = open(device_touch, O_RDWR);
+	if (fd_touch < 0) {
+		close(fd_lcd);
+		pabort("can't open device");
+	}
 	//switch_to_daemon(fd);
-	lcd_init(fd);
-	lcd_clear_background(fd);
-	ipc_main(fd);
+	lcd_init(fd_lcd, fd_touch);
+	lcd_clear_background(fd_lcd);
+	ipc_main(fd_lcd, fd_touch);
 	close(fd);
 	return 0;
 }

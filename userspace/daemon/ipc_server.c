@@ -89,7 +89,22 @@ static inline int ipc_draw_rectangle(int fd, int socket,
 	return ret;
 }
 
-static inline int ipc_action(int fd, int socket, struct sockaddr_un *connected, 
+static inline int ipc_read_touchscreen(int fd, int socket, 
+				       struct sockaddr_un *connected)
+{
+	int ret;
+	uint16_t x, y, z;
+	ret = lcd_read_touchscreen(fd, &x, &y, &z);
+	if (ret)
+		return 1;
+	send(socket, x, 2, 0);
+	send(socket, y, 2, 0);
+	send(socket, z, 2, 0);
+	return 0;
+}
+
+static inline int ipc_action(int fd_lcd, int fd_touch, int socket, 
+			     struct sockaddr_un *connected, 
 			     struct ipc_buffer *buf) 
 {
 	int ret;
@@ -98,16 +113,18 @@ static inline int ipc_action(int fd, int socket, struct sockaddr_un *connected,
 		return 1;
 	switch(buf->cmd) {
 	case WRITE_TEXT:
-		return ipc_write_text(fd, socket, connected, buf);
+		return ipc_write_text(fd_lcd, socket, connected, buf);
 	case WRITE_BITMAP:
-		return ipc_draw_bitmap(fd, socket, connected, buf);
+		return ipc_draw_bitmap(fd_lcd, socket, connected, buf);
 	case WRITE_RECTANGLE:
-		return ipc_draw_rectangle(fd, socket, connected, buf);
+		return ipc_draw_rectangle(fd_lcd, socket, connected, buf);
+	case READ_TOUCHSCREEN:
+		return ipc_read_touchscreen(fd_touch, socket, connected);
 	}
 	return 1;
 }
 
-int ipc_main(int fd)
+int ipc_main(int fd_lcd, int fd_touch)
 {
 	struct sockaddr_un server, client;
 	int ret, server_socket, client_socket;
@@ -126,7 +143,7 @@ int ipc_main(int fd)
 		client_socket = ipc_accept(server_socket, &server, &client);
 		if (client_socket < 0) 
 			perror("ipc_accept");
-		ret = ipc_action(fd, client_socket, &client, &buf);
+		ret = ipc_action(fd_lcd, fd_touch, client_socket, &client, &buf);
 		if (ret)
 			perror("ipc_action");
 		close(client_socket);
