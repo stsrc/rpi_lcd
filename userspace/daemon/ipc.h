@@ -17,9 +17,5 @@ struct ipc_buffer {
 	uint16_t dy;
 };
 
-/*
- * ALL PROBLEMS WITH ALLIGNMENT - GET INFORMATIONS!
- */
-
 #include "lcd_spi.h"
 #endif

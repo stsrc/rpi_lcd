@@ -45,5 +45,9 @@ static int send_text(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-	return send_text(argc, argv);
+	int ret;
+	ret = send_text(argc, argv);
+	if (ret)
+		perror("send_text");
+	return ret;
 }

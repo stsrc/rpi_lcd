@@ -342,83 +342,83 @@ static inline void lcd_set_pos(uint8_t **mem, struct ipc_buffer *buf,
 	}
 }
 
-static void lcd_colorize_text(uint8_t *mem, enum colors color)
+static int lcd_colorize_text(uint8_t *mem, enum colors color)
 {
 	switch(color) {
 	case black:
 		lcd_color_prepare(0, 0, 0, mem);
-		return;
+		return 0;
 	case white:
 		lcd_color_prepare(31, 63, 31, mem);
-		return;
+		return 0;
 	case red:
 	       lcd_color_prepare(31, 0, 0, mem);
-		return;
+		return 0;
 	case blue:
 		lcd_color_prepare(0, 0, 31, mem);
-		return;
+		return 0;
 	case yellow:
 		lcd_color_prepare(31, 63, 0, mem);
-		return;
+		return 0;
 	case green:
 		lcd_color_prepare(0, 63, 0, mem);
-		return;
+		return 0;
 	case brown:
 		lcd_color_prepare(31, 31, 0, mem);
-		return;
+		return 0;
 	case background:
-		return;
+		return 0;
 	default:
-		return;
+		return -1;
 	}		
-	return;	
+	return -1;	
 }
 
-void lcd_return_colors(enum colors color, uint8_t *red_p, uint8_t *green_p,
-		       uint8_t *blue_p)
+int lcd_return_colors(enum colors color, uint8_t *red_p, uint8_t *green_p,
+		      uint8_t *blue_p)
 {
 	switch(color) {
 	case black:
 		*red_p = 0;
 		*green_p = 0;
 		*blue_p = 0;
-		return;
+		return 0;
 	case white:
 		*red_p = 31;
 		*green_p = 63;
 		*blue_p = 31;
-		return;
+		return 0;
 	case red:
 		*red_p = 31;
 		*green_p = 0;
 		*blue_p = 0;
-		return;
+		return 0;
 	case blue:
 		*red_p = 0;
 		*green_p = 0;
 		*blue_p = 31;
-		return;
+		return 0;
 	case yellow:
 		*red_p = 31;
 		*green_p = 63;
 		*blue_p = 0;
-		return;
+		return 0;
 	case green:
 		*red_p = 0;
 		*green_p = 63;
 		*blue_p = 0;
-		return;
+		return 0;
 	case brown:
 		*red_p = 31;
 		*green_p = 31;
 		*blue_p = 0;
-		return;
+		return 0;
 	case background:
-		return;
+		return 0 ;
 	default:
-		return;
+		return -1;
 	}		
-	return;	
+	return -1;	
 }
 
 static int lcd_put_text(uint8_t const *mem, struct ipc_buffer *buf, 
@@ -484,6 +484,10 @@ static inline int lcd_check_input(struct ipc_buffer *buf)
 		errno = EINVAL;
 		return -1;
 	} else if (buf->y >= HEIGHT_MAX / FONT_Y_LEN) {
+		errno = EINVAL;
+		return -1;
+	} else if (buf->dx > (LENGTH_MAX / FONT_X_LEN) *
+		   (HEIGHT_MAX / FONT_Y_LEN)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -608,7 +612,7 @@ int main(int argc, char *argv[])
 		close(fd_lcd);
 		return -1;
 	}
-	switch_to_daemon(fd_lcd, fd_touch);
+	//switch_to_daemon(fd_lcd, fd_touch);
 	lcd_init(fd_lcd, fd_touch);
 	lcd_clear_background(fd_lcd);
 	ipc_main(fd_lcd, fd_touch);

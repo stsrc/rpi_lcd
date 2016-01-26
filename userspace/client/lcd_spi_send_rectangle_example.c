@@ -20,5 +20,9 @@ static int test(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
-	return test(argc, argv);
+	int ret;
+	ret = test(argc, argv);
+	if (ret)
+		perror("test");
+	return ret;	
 }

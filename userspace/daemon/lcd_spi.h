@@ -53,8 +53,8 @@ struct lcdd_transfer {
 
 int lcd_draw_bitmap(int fd, struct ipc_buffer *buf);
 int lcd_draw_text(int fd, struct ipc_buffer *buf);
-void lcd_return_colors(enum colors color, uint8_t *red, uint8_t *green,
-		       uint8_t *blue);
+int lcd_return_colors(enum colors color, uint8_t *red, uint8_t *green,
+		      uint8_t *blue);
 int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 		       uint16_t height, uint8_t red, uint8_t green, 
 		       uint8_t blue);
