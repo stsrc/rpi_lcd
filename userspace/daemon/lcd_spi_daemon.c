@@ -513,16 +513,16 @@ static uint32_t lcd_set_text_area(int fd, struct ipc_buffer *buf,
 		} else {
 			dx = LENGTH_MAX;
 			dy = FONT_Y_LEN * *line_cnt;
-			y = (HEIGHT_MAX - 1) - FONT_Y_LEN * buf->y;
+			y = HEIGHT_MAX - FONT_Y_LEN * (buf->y + *line_cnt);
 			pix_cnt = dy * LENGTH_MAX;
 		}
 	} else {
 		x = 0;	
-		y = (HEIGHT_MAX - 1) - FONT_Y_LEN * buf->y;
+		y = HEIGHT_MAX - FONT_Y_LEN * (buf->y + 1);
 		dx = LENGTH_MAX;
 		dy = FONT_Y_LEN;
 		pix_cnt = dx * dy; 
-		*line_cnt = 1;
+		*line_cnt = 0;
 	}
 	lcd_set_rectangle(fd, x, y, dx, dy);
 	return pix_cnt;
