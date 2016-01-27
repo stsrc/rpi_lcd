@@ -1,6 +1,6 @@
 CC = gcc
 
-CFLAGS := -O0 -Wall -std=gnu99 -ggdb
+CFLAGS := -O3 -Wall -std=gnu99
 SRCFILES := $(wildcard lcd_spi*.c)
 OBJFILES := $(patsubst %.c, %.o, $(SRCFILES)) ipc_client.o
 PROGFILES := $(patsubst %.c, %, $(SRCFILES))

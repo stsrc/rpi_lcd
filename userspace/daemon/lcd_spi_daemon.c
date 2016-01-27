@@ -184,17 +184,26 @@ int lcd_read_touchscreen(int fd, uint16_t *x, uint16_t *y, uint16_t *z)
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);	
 	value = touch_generate_short(rx[1], rx[2]);
-	touch_calculate_pos(value, x, 240);
+	touch_calculate_pos(value, x, LENGTH_MAX);
 	inp.A2 = 0;
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);
 	value = touch_generate_short(rx[1], rx[2]);
-	touch_calculate_pos(value, y, 320);
+	touch_calculate_pos(value, y, HEIGHT_MAX);
 	inp.A1 = 1;
 	cmd = touch_generate_command(&inp);
 	transfer_rd_d(fd, 3, cmd, rx);
 	value = touch_generate_short(rx[1], rx[2]);
-	touch_calculate_pos(value, z, 320);
+	*z = value;
+	inp.A2 = 1;
+	inp.A1 = 0;
+	inp.A0 = 0;
+	cmd = touch_generate_command(&inp);
+	transfer_rd_d(fd, 3, cmd, rx);
+	value = touch_generate_short(rx[1], rx[2]);
+	value = 2050 - value;
+	*z = (*z + value)/2;
+	touch_calculate_pos(*z, z, LENGTH_MAX);
 	return 0;
 }
 
@@ -315,6 +324,7 @@ int lcd_draw_rectangle(int fd, uint16_t x, uint16_t y, uint16_t length,
 	mem_size = BY_PER_PIX * height * length;
 	tx = malloc(mem_size);
 	if (check_clean_mem(tx, NULL, 0)) {
+		errno = ENOMEM;
 		return -1;
 	}
 	lcd_set_rectangle(fd, x, y, length, height);
@@ -414,8 +424,9 @@ int lcd_return_colors(enum colors color, uint8_t *red_p, uint8_t *green_p,
 		*blue_p = 0;
 		return 0;
 	case background:
-		return 0 ;
+		return 0;
 	default:
+		errno = EINVAL;
 		return -1;
 	}		
 	return -1;	

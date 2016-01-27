@@ -82,12 +82,17 @@ static inline int ipc_draw_bitmap(int fd, int socket,
 {
 	int cnt = 4 * sizeof(uint16_t);
 	int ret = recv(socket, &buf->x, cnt, MSG_WAITALL);
-	if (ret != cnt)
-		return 1;
+	if (ret != cnt) {
+		IPC_WRITE_LOG("recv failed\0");	
+		return -1;
+	}
 	cnt = BY_PER_PIX*buf->dx*buf->dy;
 	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
-	if (ret != cnt)
-		return 1;
+	if (ret != cnt) {
+		IPC_WRITE_LOG("recv failed\0");
+		errno = EINVAL;
+		return -1;
+	}
 	return lcd_draw_bitmap(fd, buf);
 }
 
@@ -98,12 +103,16 @@ static inline int ipc_draw_rectangle(int fd, int socket,
 	uint8_t red, green, blue;
 	int cnt = 4 * sizeof(uint16_t);
 	int ret = recv(socket, &buf->x, cnt, MSG_WAITALL);
-	if (ret != cnt)
+	if (ret != cnt) {
+		IPC_WRITE_LOG("recv failed\0");
 		return -1;
+	}
 	cnt = 1;
 	ret = recv(socket, buf->mem, cnt, MSG_WAITALL);
-	if (ret != cnt)
+	if (ret != cnt) {
+		IPC_WRITE_LOG("recv failed\0");
 		return -1;
+	}
 	ret = lcd_return_colors(*buf->mem, &red, &green, &blue);
 	if (ret) {
 		errno = EINVAL;
@@ -111,6 +120,8 @@ static inline int ipc_draw_rectangle(int fd, int socket,
 	}
 	ret = lcd_draw_rectangle(fd, buf->x, buf->y, buf->dx, buf->dy, red,
 				 green, blue);
+	if (ret)
+		errno = EINVAL;
 	return ret;
 }
 
@@ -135,7 +146,7 @@ static inline int ipc_action(int fd_lcd, int fd_touch, int socket,
 	int ret;
 	ret = recv(socket, &(buf->cmd), sizeof(buf->cmd), MSG_WAITALL);
 	if (ret != sizeof(buf->cmd))
-		return 1;
+		return -1;
 	switch(buf->cmd) {
 	case WRITE_TEXT:
 		return ipc_write_text(fd_lcd, socket, connected, buf);
@@ -145,8 +156,11 @@ static inline int ipc_action(int fd_lcd, int fd_touch, int socket,
 		return ipc_draw_rectangle(fd_lcd, socket, connected, buf);
 	case READ_TOUCHSCREEN:
 		return ipc_read_touchscreen(fd_touch, socket, connected);
+	default:
+		errno = EINVAL;
+		return -1;
 	}
-	return 1;
+	return -1;
 }
 
 int ipc_main(int fd_lcd, int fd_touch)
@@ -172,6 +186,7 @@ int ipc_main(int fd_lcd, int fd_touch)
 		if (ret)
 			IPC_WRITE_LOG("ipc_action failed\0");
 		if (buf.cmd != READ_TOUCHSCREEN) {
+			//perror("test test");
 			send(client_socket, &errno, sizeof(errno), 0);  
 			errno = 0;
 		}

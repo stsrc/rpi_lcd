@@ -38,7 +38,7 @@ struct touch {
 	struct class *class;
 	struct device *device;
 	struct spi_device *spi_device;
-	volatile uint8_t flag;
+	uint8_t flag; /*jesli wyswietlacz nie chce sie zaswiecic - volatile moze*/
 	uint8_t *tx;
 	uint8_t *rx;
 	uint32_t irq;
@@ -98,9 +98,9 @@ static irq_handler_t touchpad_interrupt(unsigned int irq, void *dev_id,
 	spin_lock_irqsave(&touch.lock, flags);
 	if (touch.flag) {
 		rt = atomic_notifier_call_chain(&touchpad_notifier_list, 0, NULL); 
+		rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
 		touch.flag = 0;
 	}
-	rt = mod_timer(&touchpad_timer, jiffies + TIMER_DELAY);
 	spin_unlock_irqrestore(&touch.lock, flags);
 	return (irq_handler_t)IRQ_HANDLED;
 }

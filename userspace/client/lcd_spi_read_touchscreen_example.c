@@ -13,11 +13,12 @@ int main(int argc, char *argv[])
 	int ret;
 	while(1) {
 		ret = ipc_read_touchscreen(&x, &y, &z);
-		if (ret)
+		if (ret) {
+			perror("ipc_read_touchscreen");
 			return ret;
+		}
 		convert_to_string(buf, x, y, z);
-		ipc_send_text(buf, white, black, (45 - strlen(buf))/2 + 1, 21);
-		sleep(1);
+		ipc_send_text(buf, white, black, (45 - strlen(buf))/2 + 1, 19);
 	}
 	return 0;
 }
