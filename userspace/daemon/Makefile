@@ -1,6 +1,6 @@
 CC = gcc
 
-CFLAGS := -O3 -Wall -std=gnu99 -lm
+CFLAGS := -O0 -Wall -std=gnu99 -lm
 SRCFILES := ipc_server.c lcd_spi_daemon.c 
 OBJFILES := $(patsubst %.c, %.o, $(SRCFILES)) 
 PROGFILES := lcd_spi_daemon 

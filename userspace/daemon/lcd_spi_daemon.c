@@ -623,7 +623,7 @@ int main(int argc, char *argv[])
 		close(fd_lcd);
 		return -1;
 	}
-	//switch_to_daemon(fd_lcd, fd_touch);
+	switch_to_daemon(fd_lcd, fd_touch);
 	lcd_init(fd_lcd, fd_touch);
 	lcd_clear_background(fd_lcd);
 	ipc_main(fd_lcd, fd_touch);

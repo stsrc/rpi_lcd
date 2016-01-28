@@ -18,7 +18,7 @@ int main(int argc, char *argv[])
 			return ret;
 		}
 		convert_to_string(buf, x, y, z);
-		ipc_send_text(buf, white, black, (45 - strlen(buf))/2 + 1, 19);
+		ipc_send_text(buf, white, black, (48 - strlen(buf)), 0);
 	}
 	return 0;
 }
