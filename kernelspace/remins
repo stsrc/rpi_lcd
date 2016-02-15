@@ -1,2 +1,6 @@
 #!/bin/bash
-sudo rmmod lcd_spi && sudo insmod lcd_spi.ko
+sudo rmmod lcd_spi 
+sudo rmmod touchpad_spi
+sudo insmod touchpad_spi.ko
+sudo insmod lcd_spi.ko
+

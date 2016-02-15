@@ -1,6 +1,6 @@
-ccflags-y += -DDEBUG -Wall -Wno-declaration-after-statement -std=gnu99
+ccflags-y += -DDEBUG -Wall -Wno-declaration-after-statement 
 ifneq ($(KERNELRELEASE),)
-	obj-m := lcd_spi.o
+	obj-m := lcd_spi.o touchpad_spi.o
 
 else
 	KERNELDIR ?= /lib/modules/$(shell uname -r)/build
